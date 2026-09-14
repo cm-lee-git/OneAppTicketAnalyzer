@@ -16,6 +16,7 @@ from config import DOC_PAGE_IDS, HMG_DOC2_PAGE_ID
 from cycle import cycle_label, get_cycle_bounds, get_active_cycle
 
 JIRA_BROWSE = "https://hmg.atlassian.net/browse"
+MASTER_TITLE = "신규/개선 전체 현황 (AI 생성)"
 
 # Feature 1: 참조 문서 복제 — HMG Confluence에서 기존 티켓 행 읽기
 DOC2_REF_PAGE_ID = HMG_DOC2_PAGE_ID  # HMG hmg.atlassian.net 참조 페이지
@@ -1186,6 +1187,44 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
     return parts
 
 
+# ── 마스터 페이지 헬퍼 ──────────────────────────────────────────
+
+def _find_master_page(client: ConfluenceClient,
+                      folder_id: str) -> tuple[str | None, str | None, int]:
+    """폴더 내 고정 제목 마스터 페이지 탐색. 없으면 (None, None, 0) 반환."""
+    cursor: str | None = None
+    while True:
+        params: dict = {"parentId": folder_id, "limit": 50}
+        if cursor:
+            params["cursor"] = cursor
+        data = client._get("/pages", params=params)
+        for page in data.get("results", []):
+            if page["title"] == MASTER_TITLE:
+                html, version, _ = client.get_page_storage(page["id"])
+                return page["id"], html, version
+        nxt = data.get("_links", {}).get("next", "")
+        if not nxt:
+            break
+        for part in nxt.split("&"):
+            if "cursor=" in part:
+                cursor = part.split("cursor=")[-1]
+                break
+        else:
+            break
+    return None, None, 0
+
+
+def _create_snapshot(client: ConfluenceClient, master_id: str,
+                     content: str, timestamp: str) -> None:
+    """마스터 페이지 현재 내용을 하위 스냅샷 페이지로 보관."""
+    snapshot_title = f"{timestamp} 스냅샷"
+    try:
+        client.create_page(master_id, snapshot_title, content)
+        print(f"[Doc2] 스냅샷 생성: {snapshot_title}")
+    except Exception as e:
+        print(f"[Doc2] 스냅샷 생성 실패 (계속 진행): {e}")
+
+
 # ── 메인 업데이트 함수 ──────────────────────────────────────────
 def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = None, as_of: str | None = None):
     if client is None:
@@ -1228,105 +1267,14 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     html = "\n".join(sections)
 
     timestamp = as_of if as_of else now.strftime("%m-%d %H:%M")
-    title = f"{timestamp} 신규/개선 전체 현황 (AI 생성)"
-    parent_id = DOC_PAGE_IDS["doc2"]
-
-    result = client.create_page(parent_id, title, html)
-    new_id = result.get("id", "")
-    print(f"[Doc2] 완료  총 {len(tickets_with_analysis)}건")
-    print(f"[Doc2] 새 페이지: {title}  (id={new_id})")
-
-
-def update_with_new_tickets(tickets_with_analysis: list[dict],
-                            client: ConfluenceClient | None = None,
-                            new_ticket_keys: list[str] | None = None,
-                            as_of: str | None = None):
-    """월 16시, 화~금 16시: 당일 신규 티켓 있으면 기존 최신 페이지를 전체 재구성하여 업데이트."""
-    if client is None:
-        client = ConfluenceClient()
-
-    if not tickets_with_analysis:
-        print("[Doc2-Daily] 당일 신규 티켓 없음 → 종료")
-        return
-
-    # 기존 최신 doc2 페이지 찾기 — 제목 패턴 필터 후 내림차순
-    # 폴더에 수백 개 자식이 있으므로 전체 페이지네이션 후 패턴 필터링
-    all_children: list[dict] = []
-    cursor: str | None = None
-    while True:
-        params: dict = {"parentId": DOC_PAGE_IDS["doc2"], "limit": 50}
-        if cursor:
-            params["cursor"] = cursor
-        data = client._get("/pages", params=params)
-        all_children.extend(data.get("results", []))
-        nxt = data.get("_links", {}).get("next", "")
-        if not nxt:
-            break
-        # cursor 값 추출
-        for part in nxt.split("&"):
-            if part.startswith("cursor=") or "cursor=" in part:
-                cursor = part.split("cursor=")[-1]
-                break
-        else:
-            break
-
-    # 자동 생성 doc2 페이지만 필터 (제목 패턴: "MM-DD HH:MM 신규/개선 전체 현황 (AI 생성)")
-    import re as _re
-    _AI_TITLE_RE = _re.compile(r"^\d{2}-\d{2} \d{2}:\d{2} 신규/개선 전체 현황 \(AI 생성\)$")
-    matched = [p for p in all_children if _AI_TITLE_RE.match(p["title"])]
-    if not matched:
-        print("[Doc2-Daily] 기존 페이지 없음 → 종료")
-        return
-    latest = sorted(matched, key=lambda p: p["title"], reverse=True)[0]
-    page_id = latest["id"]
-    _, version, _ = client.get_page_storage(page_id)
-    print(f"[Doc2-Daily] 업데이트 대상: {latest['title']} (id={page_id})")
-
-    # 전체 데이터로 페이지 HTML 재구성 후 UPDATE (create 아님)
-    # Feature 1: HMG Confluence 참조 문서에서 이전 티켓 행 추출
-    hmg_client = HmgConfluenceClient()
-    ref_rows = _load_ref_rows_doc2(hmg_client)
-    active_cycle = get_active_cycle()
-    ref_history = _load_ref_history_doc2(hmg_client, active_cycle)
-    tickets_by_key = {t.get('key', ''): t for t in tickets_with_analysis if t.get('key')}
-
-    now = datetime.now()
-    timestamp = as_of if as_of else now.strftime("%m-%d %H:%M")
-    note_dt = f"2026-{as_of}" if as_of else now.strftime("%Y-%m-%d %H:%M")
-
-    if new_ticket_keys:
-        keys_str = ', '.join(new_ticket_keys)
-        note_text = (f"{note_dt} {len(new_ticket_keys)}개의 티켓 추가, "
-                     f"티켓 key: {keys_str}")
+    master_id, current_html, current_version = _find_master_page(client, DOC_PAGE_IDS["doc2"])
+    if master_id:
+        if current_html and current_html.strip():
+            _create_snapshot(client, master_id, current_html, timestamp)
+        client.update_page(master_id, MASTER_TITLE, html, current_version,
+                           message=f"{timestamp} 업데이트: {len(tickets_with_analysis)}건")
+        print(f"[Doc2] 마스터 페이지 업데이트 완료 (총 {len(tickets_with_analysis)}건, id={master_id})")
     else:
-        note_text = f"{note_dt} 업데이트 ({active_cycle}회차 기준)"
-    note_html = f'<p><em>{note_text}</em></p>'
-
-    _toc = (
-        '<ac:structured-macro ac:name="toc" ac:schema-version="1">'
-        '<ac:parameter ac:name="style">none</ac:parameter>'
-        '</ac:structured-macro>'
-    )
-    sections = [note_html, _toc]
-    sections += _build_section1(tickets_with_analysis, active_cycle, hmg_client=hmg_client)
-    sections += _build_region_section(
-        tickets_with_analysis, "KR", 2,
-        CW["kr_approved"], CW["kr_pending"], CW["kr_rejected"], has_cycle_col=True,
-        active_cycle=active_cycle, ref_rows=ref_rows,
-        ref_history=ref_history, tickets_by_key=tickets_by_key)
-    sections += _build_region_section(
-        tickets_with_analysis, "EU", 3,
-        CW["eu_approved"], CW["eu_pending"], CW["eu_rejected"], has_cycle_col=False,
-        active_cycle=active_cycle, ref_rows=ref_rows,
-        ref_history=ref_history, tickets_by_key=tickets_by_key)
-    sections += _build_region_section(
-        tickets_with_analysis, "HQ", 4,
-        CW["eu_approved"], CW["eu_pending"], CW["eu_rejected"], has_cycle_col=False,
-        active_cycle=active_cycle, ref_rows=ref_rows,
-        ref_history=ref_history, tickets_by_key=tickets_by_key)
-    html = "\n".join(sections)
-
-    new_title = f"{timestamp} 신규/개선 전체 현황 (AI 생성)"
-    client.update_page(page_id, new_title, html, version,
-                       message=f"Daily: 신규 {len(new_ticket_keys) if new_ticket_keys else len(tickets_with_analysis)}건 반영")
-    print(f"[Doc2-Daily] 완료  총 {len(tickets_with_analysis)}건 → {new_title}")
+        result = client.create_page(DOC_PAGE_IDS["doc2"], MASTER_TITLE, html)
+        new_id = result.get("id", "")
+        print(f"[Doc2] 마스터 페이지 최초 생성 (총 {len(tickets_with_analysis)}건, id={new_id})")

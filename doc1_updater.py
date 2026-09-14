@@ -30,6 +30,7 @@ BRD_DISPLAY = {
 }
 
 TABLE_TITLE  = "New/Improvement"
+MASTER_TITLE = "KKR OneApp 주간 보고 (AI 생성)"
 SECTION_PRE  = "BRD 프로세스 적용 이전 (Pre-BRD)"
 SECTION_POST = "BRD 프로세스 적용 이후"
 TOTAL_COLS   = 12
@@ -778,48 +779,21 @@ def _split_tickets(tickets: list[dict]) -> tuple[list[dict], list[dict]]:
     return pre, post
 
 
-# ─── Daily 추가 ──────────────────────────────────────────────────────────────
+# ─── 마스터 페이지 헬퍼 ──────────────────────────────────────────────────────
 
-def _count_tickets_in_tbody(tbody: Tag) -> int:
-    """tbody에서 티켓 수 카운트: 첫 번째 셀이 rowspan=6인 행 수."""
-    count = 0
-    for tr in tbody.find_all('tr'):
-        first = tr.find(['td', 'th'])
-        if first and first.get('rowspan') == '6':
-            count += 1
-    return count
-
-
-def append_new_tickets(tickets_with_analysis: list[dict],
-                       client: ConfluenceClient | None = None,
-                       as_of: str | None = None) -> bool:
-    """화~금: 당일 신규 티켓만 기존 최신 doc1 페이지에 추가.
-    Returns True if handled (success or no-op), False if fallback to full rebuild needed.
-    """
-    if client is None:
-        client = ConfluenceClient()
-
-    active_cycle = get_active_cycle()
-
-    # 오버라이드 적용 → KR 권역, 현재 회차만
-    all_tickets = _apply_overrides(tickets_with_analysis)
-    kr_tickets = [t for t in all_tickets
-                  if t.get("region") == "KR" and t.get("cycle_number", 0) == active_cycle]
-    if not kr_tickets and not as_of:
-        print("[Doc1-Daily] 신규 KR 티켓 없음 → 종료")
-        return True
-
-    # 폴더에 수백 개 자식이 있으므로 전체 페이지네이션 후 패턴 필터링
-    import re as _re
-    _AI_TITLE_RE = _re.compile(r"^\d{2}-\d{2} \d{2}:\d{2} KKR OneApp 주간 보고 \(AI 생성\)$")
-    all_children: list[dict] = []
+def _find_master_page(client: ConfluenceClient,
+                      folder_id: str) -> tuple[str | None, str | None, int]:
+    """폴더 내 고정 제목 마스터 페이지 탐색. 없으면 (None, None, 0) 반환."""
     cursor: str | None = None
     while True:
-        params: dict = {"parentId": DOC_PAGE_IDS["doc1"], "limit": 50}
+        params: dict = {"parentId": folder_id, "limit": 50}
         if cursor:
             params["cursor"] = cursor
         data = client._get("/pages", params=params)
-        all_children.extend(data.get("results", []))
+        for page in data.get("results", []):
+            if page["title"] == MASTER_TITLE:
+                html, version, _ = client.get_page_storage(page["id"])
+                return page["id"], html, version
         nxt = data.get("_links", {}).get("next", "")
         if not nxt:
             break
@@ -829,51 +803,21 @@ def append_new_tickets(tickets_with_analysis: list[dict],
                 break
         else:
             break
-    matched = [p for p in all_children if _AI_TITLE_RE.match(p["title"])]
-    if not matched:
-        print("[Doc1-Daily] 기존 페이지 없음 → 전체 재빌드로 폴백")
-        return False
-    latest = sorted(matched, key=lambda p: p["title"], reverse=True)[0]
-    page_id = latest["id"]
-    print(f"[Doc1-Daily] 대상 페이지: {latest['title']} (id={page_id})")
-
-    html, version, title = client.get_page_storage(page_id)
-    soup = BeautifulSoup(html, 'html.parser')
-
-    tables = soup.find_all('table')
-    if not tables:
-        print("[Doc1-Daily] 표 구조 이상 (테이블 없음) → 종료")
-        return True
-
-    current_tbody = tables[0].find('tbody')
-    existing_count = _count_tickets_in_tbody(current_tbody)
-
-    for i, ticket in enumerate(kr_tickets):
-        for row in _build_post_brd_block(soup, ticket, existing_count + i + 1):
-            current_tbody.append(row)
-
-    # 업데이트 노트 (맨 위) + 제목 변경
-    now = datetime.now()
-    timestamp = as_of if as_of else now.strftime("%m-%d %H:%M")
-    note_dt = f"2026-{as_of}" if as_of else now.strftime("%Y-%m-%d %H:%M")
-    new_keys = [t.get('key', '') for t in kr_tickets]
-    keys_str = ', '.join(new_keys) if new_keys else '-'
-    note_p = soup.new_tag('p')
-    em_tag = soup.new_tag('em')
-    em_tag.string = (f"{note_dt} {len(new_keys)}개의 티켓 추가, "
-                     f"티켓 key: {keys_str}")
-    note_p.append(em_tag)
-    soup.insert(0, note_p)
-
-    new_title = f"{timestamp} KKR OneApp 주간 보고 (AI 생성)"
-    client.update_page(page_id, new_title, str(soup), version,
-                       message=f"Daily: {len(new_pre)}건 Pre-BRD, {len(new_post)}건 Post-BRD 추가")
-    print(f"[Doc1-Daily] 완료  {len(kr_tickets)}건 추가 ({active_cycle}회차)")
-    print(f"[Doc1-Daily] 페이지 업데이트: {new_title} (id={page_id})")
-    return True
+    return None, None, 0
 
 
-# ─── Weekly 전체 재빌드 ──────────────────────────────────────────────────────
+def _create_snapshot(client: ConfluenceClient, master_id: str,
+                     content: str, timestamp: str) -> None:
+    """마스터 페이지 현재 내용을 하위 스냅샷 페이지로 보관."""
+    snapshot_title = f"{timestamp} 스냅샷"
+    try:
+        client.create_page(master_id, snapshot_title, content)
+        print(f"[Doc1] 스냅샷 생성: {snapshot_title}")
+    except Exception as e:
+        print(f"[Doc1] 스냅샷 생성 실패 (계속 진행): {e}")
+
+
+# ─── 전체 재빌드 ─────────────────────────────────────────────────────────────
 
 def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = None,
            as_of: str | None = None, jira_client=None):
@@ -900,7 +844,7 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     # 업데이트 노트 (맨 위)
     note_p = soup.new_tag('p')
     em_tag = soup.new_tag('em')
-    em_tag.string = (f"{now.strftime('%Y-%m-%d %H:%M')} 전체 재생성 "
+    em_tag.string = (f"{now.strftime('%Y-%m-%d %H:%M')} 업데이트 "
                      f"({active_cycle}회차 {len(current_tickets)}건)")
     note_p.append(em_tag)
     soup.append(note_p)
@@ -959,10 +903,14 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     soup.append(p_disclaimer)
 
     timestamp = as_of if as_of else now.strftime("%m-%d %H:%M")
-    title = f"{timestamp} KKR OneApp 주간 보고 (AI 생성)"
-    parent_id = DOC_PAGE_IDS["doc1"]
-
-    result = client.create_page(parent_id, title, str(soup))
-    new_id = result.get("id", "")
-    print(f"[Doc1] 완료  {active_cycle}회차: {len(current_tickets)}건")
-    print(f"[Doc1] 새 페이지: {title}  (id={new_id})")
+    master_id, current_html, current_version = _find_master_page(client, DOC_PAGE_IDS["doc1"])
+    if master_id:
+        if current_html and current_html.strip():
+            _create_snapshot(client, master_id, current_html, timestamp)
+        client.update_page(master_id, MASTER_TITLE, str(soup), current_version,
+                           message=f"{timestamp} 업데이트: {len(current_tickets)}건")
+        print(f"[Doc1] 마스터 페이지 업데이트 완료 ({active_cycle}회차: {len(current_tickets)}건, id={master_id})")
+    else:
+        result = client.create_page(DOC_PAGE_IDS["doc1"], MASTER_TITLE, str(soup))
+        new_id = result.get("id", "")
+        print(f"[Doc1] 마스터 페이지 최초 생성 ({active_cycle}회차: {len(current_tickets)}건, id={new_id})")

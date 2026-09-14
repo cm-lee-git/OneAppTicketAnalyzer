@@ -1,8 +1,40 @@
+import hashlib
 import json
 import os
+import pathlib
+from datetime import datetime
 import httpx
 from config import ANTHROPIC_API_KEY, SCORE_KEYS_FOR_PRIORITY
 from jira_client import JiraClient
+
+_CACHE_PATH = pathlib.Path("tickets_analysis_cache.json")
+
+
+def _load_cache() -> dict:
+    if _CACHE_PATH.exists():
+        try:
+            return json.loads(_CACHE_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            return {}
+    return {}
+
+
+def _save_cache(cache: dict) -> None:
+    _CACHE_PATH.write_text(
+        json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+
+
+def _content_hash(ticket: dict, own_comments: str) -> str:
+    """분석에 영향을 주는 티켓 필드 + 댓글을 합쳐 16자리 해시 반환."""
+    content = "\n".join([
+        ticket.get("summary", ""),
+        ticket.get("description", ""),
+        ticket.get("brd_status_raw", ""),
+        ticket.get("feature_type", ""),
+        own_comments,
+    ])
+    return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
 
 _ENDPOINT: str = ""
 
@@ -34,6 +66,7 @@ def _call_claude(system_prompt: str, user_msg: str) -> str:
     payload = {
         "model": "claude-sonnet-4-6",
         "max_tokens": 1500,
+        "temperature": 0,
         "system": system_prompt,
         "messages": [{"role": "user", "content": user_msg}],
     }
@@ -323,8 +356,13 @@ BRD 상태: {ticket['brd_status_raw']}
 
 
 def analyze_tickets_batch(tickets: list[dict]) -> list[dict]:
-    """여러 티켓을 순차 분석. description을 개별 조회 후 분석 결과 병합하여 반환."""
+    """여러 티켓을 순차 분석. description을 개별 조회 후 분석 결과 병합하여 반환.
+
+    캐시(tickets_analysis_cache.json): 티켓 내용(description·summary·BRD상태·댓글)이
+    변경되지 않은 경우 Claude 호출 없이 저장된 결과를 재사용.
+    """
     jira = JiraClient()
+    cache = _load_cache()
 
     # R3 중복 감지용: 전체 티켓 (key, summary) 목록 사전 수집
     all_ticket_index: list[tuple[str, str]] = [
@@ -332,6 +370,7 @@ def analyze_tickets_batch(tickets: list[dict]) -> list[dict]:
     ]
 
     results = []
+    cache_hits = 0
     for t in tickets:
         key = t.get("key", "?")
         if not t.get("description"):
@@ -344,29 +383,47 @@ def analyze_tickets_batch(tickets: list[dict]) -> list[dict]:
         if t.get("brd_approval") == "보류":
             own_comments = jira.get_own_comments(key, max_comments=5)
 
-        # R3용: 현재 티켓 제외한 전체 목록
-        other_tickets = [(k, s) for k, s in all_ticket_index if k != key]
-
-        try:
-            analysis = analyze_ticket(t, other_tickets=other_tickets, own_comments=own_comments)
-            scores = analysis.get("scores", {})
-            o_count = sum(1 for v in scores.values() if float(v or 0) > 0)
-            print(f"  [분석] {key}: scores O={o_count}/6  priority={analysis.get('priority_score', 0)}"
-                  f"  hold={analysis.get('hold_code')}  rej={analysis.get('rejection_code')}")
-        except Exception as e:
-            print(f"  [분석] {key}: 분석 실패 → {e}")
-            analysis = {
-                "summary_ko": "",
-                "background": "",
-                "problem": "",
-                "feature_label": "기존 기능 개선",
-                "feature": "",
-                "hold_code": None,
-                "hold_reason": None,
-                "rejection_code": None,
-                "rejection_reason": None,
-                "scores": {k: 0 for k in ["urgency"] + SCORE_KEYS_FOR_PRIORITY},
-                "priority_score": 0,
+        # 캐시 확인: 티켓 내용이 동일하면 Claude 호출 생략
+        h = _content_hash(t, own_comments)
+        cached_entry = cache.get(key, {})
+        if cached_entry.get("content_hash") == h:
+            print(f"  [캐시] {key}: 내용 변경 없음 → 저장된 결과 사용 ({cached_entry.get('analyzed_at', '')})")
+            analysis = cached_entry["analysis"]
+            cache_hits += 1
+        else:
+            # R3용: 현재 티켓 제외한 전체 목록
+            other_tickets = [(k, s) for k, s in all_ticket_index if k != key]
+            try:
+                analysis = analyze_ticket(t, other_tickets=other_tickets, own_comments=own_comments)
+                scores = analysis.get("scores", {})
+                o_count = sum(1 for v in scores.values() if float(v or 0) > 0)
+                print(f"  [분석] {key}: scores O={o_count}/6  priority={analysis.get('priority_score', 0)}"
+                      f"  hold={analysis.get('hold_code')}  rej={analysis.get('rejection_code')}")
+            except Exception as e:
+                print(f"  [분석] {key}: 분석 실패 → {e}")
+                analysis = {
+                    "summary_ko": "",
+                    "background": "",
+                    "problem": "",
+                    "feature_label": "기존 기능 개선",
+                    "feature": "",
+                    "hold_code": None,
+                    "hold_reason": None,
+                    "rejection_code": None,
+                    "rejection_reason": None,
+                    "scores": {k: 0 for k in ["urgency"] + SCORE_KEYS_FOR_PRIORITY},
+                    "priority_score": 0,
+                }
+            # 캐시 저장 (실패 결과도 저장 — 반복 실패 방지)
+            cache[key] = {
+                "content_hash": h,
+                "analyzed_at": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "analysis": analysis,
             }
+            _save_cache(cache)
+
         results.append({**t, **analysis})
+
+    total = len(tickets)
+    print(f"  [캐시 요약] 전체 {total}건 중 {cache_hits}건 캐시 사용, {total - cache_hits}건 신규 분석")
     return results

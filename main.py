@@ -157,7 +157,7 @@ def _apply_test_cycle_filter(tickets: list[dict]) -> list[dict]:
 
 
 def cmd_doc1(as_of: str | None = None, test_mode: bool = False):
-    """월요일: 전체 티켓 재빌드 후 새 페이지 생성."""
+    """평일: 전체 티켓 분석 후 마스터 페이지 업데이트 + 스냅샷 생성."""
     _check_env()
     jira = JiraClient()
     jql = _build_test_jql() if test_mode else _get_weekly_jql()
@@ -170,98 +170,31 @@ def cmd_doc1(as_of: str | None = None, test_mode: bool = False):
     doc1_updater.update(tickets, ConfluenceClient(), as_of=as_of, jira_client=jira)
 
 
-def cmd_doc1_daily(as_of: str | None = None, from_date: str | None = None,
-                   test_mode: bool = False):
-    """화~금: 당일 생성된 신규 티켓만 기존 페이지에 추가."""
-    _check_env()
-    from datetime import timedelta, date as _date
-    d = _date.fromisoformat(from_date) if from_date else date.today()
-    tomorrow = d + timedelta(days=1)
-    extra_jql = (
-        f'created >= "2026-01-01" '
-        f'AND created >= "{d.isoformat()}" '
-        f'AND created < "{tomorrow.isoformat()}"'
-    )
-    tickets = _fetch_and_analyze(extra_jql=extra_jql)
-    if test_mode:
-        tickets = _apply_test_cycle_filter(tickets)
-    success = doc1_updater.append_new_tickets(tickets, ConfluenceClient(), as_of=as_of)
-    if not success:
-        print("[Doc1-Daily] 폴백: 기존 페이지 없음 → 전체 재빌드 실행")
-        cmd_doc1(as_of=as_of, test_mode=test_mode)
-
-
-def cmd_doc2(as_of: str | None = None, test_mode: bool = False):
-    """월요일 10시: 전체 티켓 재빌드 후 새 페이지 생성."""
-    _check_env()
-    jql = _build_test_jql() if test_mode else _get_weekly_jql()
-    tickets = _fetch_and_analyze(
-        extra_jql=jql,
-        save_path="tickets_analyzed_latest.json",
-    )
-    if test_mode:
-        tickets = _apply_test_cycle_filter(tickets)
-    doc2_updater.update(tickets, ConfluenceClient(), as_of=as_of)
-
-
-def cmd_doc2_daily(as_of: str | None = None, from_date: str | None = None,
-                   use_cache: bool = False, test_mode: bool = False):
-    """월 16시, 화~금 16시: 당일 신규 티켓 있으면 전체 분석 + 기존 페이지 업데이트.
+def cmd_doc2(as_of: str | None = None, test_mode: bool = False,
+             use_cache: bool = False):
+    """평일: 전체 티켓 분석 후 마스터 페이지 업데이트 + 스냅샷 생성.
 
     use_cache: True이면 tickets_analyzed_latest.json 재사용 (Claude 분석 생략).
-    test_mode: True이면 6·7회차 티켓만 처리.
     """
     _check_env()
     import json, pathlib
-    from datetime import timedelta, date as _date
+    jql = _build_test_jql() if test_mode else _get_weekly_jql()
 
-    d = _date.fromisoformat(from_date) if from_date else date.today()
-    tomorrow = d + timedelta(days=1)
-    today_jql = (
-        f'created >= "{d.isoformat()}" '
-        f'AND created < "{tomorrow.isoformat()}"'
-    )
-    full_jql = _build_test_jql() if test_mode else 'created >= "2026-01-01"'
-
-    # 당일 신규 티켓 확인 (빠른 체크)
-    from jira_client import JiraClient
-    jira_check = JiraClient()
-    new_today = jira_check.get_new_improvement_tickets(extra_jql=today_jql)
-    if test_mode:
-        new_today = _apply_test_cycle_filter(
-            [dict(t, cycle_number=get_cycle_number(
-                date.fromisoformat(t["created"]) if t.get("created") else date.today()
-            )) for t in new_today]
-        )
-    if not new_today and not as_of:
-        print("[Doc2-Daily] 당일 신규 티켓 없음 → 종료")
-        return
-    if new_today:
-        print(f"[Doc2-Daily] 당일 신규 티켓 {len(new_today)}건 감지")
-    else:
-        print("[Doc2-Daily] 신규 티켓 없음 (타임스탬프 업데이트만 수행)")
-
-    new_today_keys = [t.get("key", "") for t in new_today if t.get("key")]
-
-    # 캐시 모드: tickets_analyzed_latest.json 재사용
     cache_path = pathlib.Path("tickets_analyzed_latest.json")
     if use_cache and cache_path.exists():
-        print(f"[Doc2-Daily] 캐시 사용 → {cache_path} ({cache_path.stat().st_size // 1024}KB)")
-        all_tickets = json.loads(cache_path.read_text(encoding="utf-8"))
+        print(f"[Doc2] 캐시 사용 → {cache_path} ({cache_path.stat().st_size // 1024}KB)")
+        tickets = json.loads(cache_path.read_text(encoding="utf-8"))
         if test_mode:
-            all_tickets = _apply_test_cycle_filter(all_tickets)
+            tickets = _apply_test_cycle_filter(tickets)
     else:
-        print("[Doc2-Daily] 전체 분석 시작")
-        all_tickets = _fetch_and_analyze(
-            extra_jql=full_jql,
+        tickets = _fetch_and_analyze(
+            extra_jql=jql,
             save_path="tickets_analyzed_latest.json",
         )
         if test_mode:
-            all_tickets = _apply_test_cycle_filter(all_tickets)
+            tickets = _apply_test_cycle_filter(tickets)
 
-    doc2_updater.update_with_new_tickets(all_tickets, ConfluenceClient(),
-                                         new_ticket_keys=new_today_keys,
-                                         as_of=as_of)
+    doc2_updater.update(tickets, ConfluenceClient(), as_of=as_of)
 
 
 def cmd_snapshot(force_cycle=None, as_of: str | None = None):
@@ -285,27 +218,32 @@ def cmd_all(test_mode: bool = False):
     doc2_updater.update(tickets, client)
 
 
+def _cmd_doc2_daily_compat(as_of, from_date, use_cache, test_mode):
+    """하위 호환: --doc2-daily는 --doc2와 동일하게 동작."""
+    cmd_doc2(as_of=as_of, test_mode=test_mode, use_cache=use_cache)
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="CCI Ticket Analyst")
     group = parser.add_mutually_exclusive_group(required=True)
-    group.add_argument("--doc1",         action="store_true", help="Doc1 월요일 전체 재생성")
-    group.add_argument("--doc1-daily",   action="store_true", help="Doc1 화~금 당일 신규 티켓 추가")
+    group.add_argument("--doc1",         action="store_true", help="Doc1 업데이트 (마스터 페이지 + 스냅샷)")
+    group.add_argument("--doc2",         action="store_true", help="Doc2 업데이트 (마스터 페이지 + 스냅샷)")
+    group.add_argument("--doc1-daily",   action="store_true", help="(--doc1과 동일, 하위 호환)")
+    group.add_argument("--doc2-daily",   action="store_true", help="(--doc2와 동일, 하위 호환)")
     group.add_argument("--snapshot",     action="store_true", help="회차별 마감 히스토리 스냅샷 (회차 마감일 18시)")
-    parser.add_argument("--force-cycle", type=int, default=None, metavar="N",
-                        help="--snapshot 테스트용: 특정 회차 번호 강제 지정 (기본: 오늘 날짜 자동 판별)")
-    parser.add_argument("--timestamp", type=str, default=None, metavar="MM-DD HH:MM",
-                        help="페이지 제목 타임스탬프 오버라이드 (예: '08-19 11:00'). 미지정 시 현재 시각 사용")
-    parser.add_argument("--from-date", type=str, default=None, metavar="YYYY-MM-DD",
-                        help="daily 명령의 JQL 날짜 오버라이드 (예: '2026-08-25'). 미지정 시 오늘")
-    parser.add_argument("--use-cache", action="store_true",
-                        help="--doc2-daily: tickets_analyzed_latest.json 재사용, Claude 분석 생략")
-    parser.add_argument("--test", action="store_true",
-                        help=f"테스트 모드: {_TEST_CYCLES[0]}·{_TEST_CYCLES[-1]}회차 티켓만 조회·분석")
-    group.add_argument("--doc2",         action="store_true", help="Doc2 월요일 전체 재생성")
-    group.add_argument("--doc2-daily",   action="store_true", help="Doc2 월16시·화~금16시 신규 티켓 업데이트")
     group.add_argument("--all",          action="store_true", help="전체 문서 업데이트 (Doc1+Doc2)")
     group.add_argument("--list-fields",  action="store_true", help="Jira 커스텀 필드 목록 출력")
     group.add_argument("--delete-page",  type=str, metavar="PAGE_ID", help="Confluence 페이지 영구 삭제")
+    parser.add_argument("--force-cycle", type=int, default=None, metavar="N",
+                        help="--snapshot 테스트용: 특정 회차 번호 강제 지정")
+    parser.add_argument("--timestamp", type=str, default=None, metavar="MM-DD HH:MM",
+                        help="스냅샷 제목 타임스탬프 오버라이드 (예: '09-14 11:00'). 미지정 시 현재 시각")
+    parser.add_argument("--from-date", type=str, default=None, metavar="YYYY-MM-DD",
+                        help="(하위 호환용, 현재 사용 안 함)")
+    parser.add_argument("--use-cache", action="store_true",
+                        help="--doc2: tickets_analyzed_latest.json 재사용, Claude 분석 생략")
+    parser.add_argument("--test", action="store_true",
+                        help=f"테스트 모드: {_TEST_CYCLES[0]}·{_TEST_CYCLES[-1]}회차 티켓만 조회·분석")
     args = parser.parse_args()
 
     if args.delete_page:
@@ -313,16 +251,11 @@ if __name__ == "__main__":
         ConfluenceClient().delete_page(args.delete_page)
     elif args.list_fields:
         cmd_list_fields()
-    elif args.doc1:
+    elif args.doc1 or args.doc1_daily:
         cmd_doc1(as_of=args.timestamp, test_mode=args.test)
-    elif args.doc1_daily:
-        cmd_doc1_daily(as_of=args.timestamp, from_date=args.from_date, test_mode=args.test)
+    elif args.doc2 or args.doc2_daily:
+        cmd_doc2(as_of=args.timestamp, test_mode=args.test, use_cache=args.use_cache)
     elif args.snapshot:
         cmd_snapshot(force_cycle=args.force_cycle, as_of=args.timestamp)
-    elif args.doc2:
-        cmd_doc2(as_of=args.timestamp, test_mode=args.test)
-    elif args.doc2_daily:
-        cmd_doc2_daily(as_of=args.timestamp, from_date=args.from_date,
-                       use_cache=args.use_cache, test_mode=args.test)
     elif args.all:
         cmd_all(test_mode=args.test)
