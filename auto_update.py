@@ -35,18 +35,23 @@ def log(msg: str):
         f.write(f"[{ts}] {msg}\n")
 
 
+def _gh_headers(token: str) -> dict:
+    h = {"Accept": "application/vnd.github+json"}
+    if token:
+        h["Authorization"] = f"token {token}"
+    return h
+
+
 def download_zip(token: str) -> bytes:
     url = f"https://api.github.com/repos/{REPO}/zipball/{BRANCH}"
-    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
-    r = requests.get(url, headers=headers, timeout=60)
+    r = requests.get(url, headers=_gh_headers(token), timeout=60)
     r.raise_for_status()
     return r.content
 
 
 def get_latest_sha(token: str) -> str:
     url = f"https://api.github.com/repos/{REPO}/commits/{BRANCH}"
-    headers = {"Authorization": f"token {token}", "Accept": "application/vnd.github+json"}
-    r = requests.get(url, headers=headers, timeout=30)
+    r = requests.get(url, headers=_gh_headers(token), timeout=30)
     r.raise_for_status()
     return r.json()["sha"]
 
@@ -101,10 +106,7 @@ def run_setup_tasks():
 
 
 def main():
-    token = os.getenv("GITHUB_TOKEN", "").strip()
-    if not token:
-        log("[오류] .env에 GITHUB_TOKEN이 없습니다. 업데이트를 건너뜁니다.")
-        sys.exit(1)
+    token = os.getenv("GITHUB_TOKEN", "").strip()  # public repo이면 없어도 동작
 
     log("최신 커밋 확인 중...")
     try:

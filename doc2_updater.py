@@ -200,6 +200,19 @@ def _cycle_expand_title(cycle_n):
     return f"#Cycle {cycle_n} ({start.year}. {start.month}/{start.day}~{end.month}/{end.day})"
 
 
+def _fill_missing_cycles(history_entries: list, active_cycle: int) -> list:
+    """이전 회차 expand 목록에 누락된 회차를 '해당 티켓 없음'으로 채워 반환.
+    Pre-BRD + Cycle 1 ~ active_cycle-1 전체를 순서대로 반환.
+    """
+    existing = {title: body for title, body in history_entries}
+    result = []
+    result.append(("Pre-BRD", existing.get("Pre-BRD", _no_tickets(prebrd=True))))
+    for cn in range(1, active_cycle):
+        title = _cycle_expand_title(cn)
+        result.append((title, existing.get(title, _no_tickets())))
+    return result
+
+
 def _reporter_html(reporter: str, initiator: str, rs: int = 6) -> str:
     """Reporter + 발의자 셀 HTML."""
     content = f"<p>{reporter}</p>"
@@ -1156,8 +1169,8 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
 
     # ── 승인 티켓 ──
     parts.append(_p_bold(f"{section_num}.1. 승인 티켓"))
-    # 이전 회차 (HMG 참조 — closed/resolved 필터 + summary 업데이트)
-    for cycle_title, body_html in region_hist.get('Approved', []):
+    # 이전 회차 — 누락 회차는 '해당 티켓 없음'으로 채움
+    for cycle_title, body_html in _fill_missing_cycles(region_hist.get('Approved', []), active_cycle):
         updated = _apply_history_filter_and_update(body_html, tbk, has_cycle_col, 'approved')
         parts.append(_expand(cycle_title, updated))
     # 현재 회차
@@ -1166,8 +1179,8 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
 
     # ── 보류 티켓 ──
     parts.append(_p_bold(f"{section_num}.2. 보류 티켓"))
-    # 이전 회차 (closed/resolved 필터 + 구조 불일치 재생성)
-    for cycle_title, body_html in region_hist.get('보류', []):
+    # 이전 회차 — 누락 회차는 '해당 티켓 없음'으로 채움
+    for cycle_title, body_html in _fill_missing_cycles(region_hist.get('보류', []), active_cycle):
         updated = _apply_history_filter_and_update(body_html, tbk, has_cycle_col, 'pending')
         parts.append(_expand(cycle_title, updated))
     # 현재 회차
@@ -1176,8 +1189,8 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
 
     # ── 반려 티켓 ──
     parts.append(_p_bold(f"{section_num}.3. 반려 티켓"))
-    # 이전 회차
-    for cycle_title, body_html in region_hist.get('반려', []):
+    # 이전 회차 — 누락 회차는 '해당 티켓 없음'으로 채움
+    for cycle_title, body_html in _fill_missing_cycles(region_hist.get('반려', []), active_cycle):
         updated = _apply_history_filter_and_update(body_html, tbk, has_cycle_col, 'rejected')
         parts.append(_expand(cycle_title, updated))
     # 현재 회차

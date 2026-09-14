@@ -315,30 +315,22 @@ def _send_one(to: list[str], subject: str, events: list[dict],
 
 
 def send_email(events: list[dict]):
-    """프로젝트별로 수신자를 분리하여 이메일 발송. 변경 없을 때도 0건으로 발송."""
-    if not events:
-        all_to = [addr for addrs in PROJECT_RECIPIENTS.values() for addr in addrs]
-        subject = "[Jira 알림] 상태변경 0건 / 새댓글 0건"
-        _send_one(all_to, subject, events, since_iso=_send_email_since, now_iso=_send_email_now)
-        return
-
+    """프로젝트별로 수신자를 분리하여 이메일 발송. 이벤트가 0건이어도 각 프로젝트에 개별 발송."""
     # 프로젝트별로 이벤트 그룹화
     by_project: dict[str, list[dict]] = {}
     for ev in events:
         proj = ev["key"].split("-")[0]   # "KCCIVOC-7407" → "KCCIVOC"
         by_project.setdefault(proj, []).append(ev)
 
-    for proj, proj_events in by_project.items():
-        to = PROJECT_RECIPIENTS.get(proj)
-        if not to:
-            print(f"[알림] {proj} 수신자 미설정 → 건너뜀")
-            continue
+    # PROJECT_RECIPIENTS 기준으로 항상 모든 프로젝트에 발송 (0건 포함)
+    for proj, to in PROJECT_RECIPIENTS.items():
+        proj_events = by_project.get(proj, [])
         n_status  = sum(1 for e in proj_events if e["type"] == "status")
         n_comment = sum(1 for e in proj_events if e["type"] == "comment")
         parts = []
         if n_status:  parts.append(f"상태변경 {n_status}건")
         if n_comment: parts.append(f"새댓글 {n_comment}건")
-        subject = f"[Jira 알림/{proj}] {' / '.join(parts)}"
+        subject = f"[Jira 알림/{proj}] {' / '.join(parts) if parts else '상태변경 0건 / 새댓글 0건'}"
         _send_one(to, subject, proj_events, since_iso=_send_email_since, now_iso=_send_email_now)
 
 

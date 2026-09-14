@@ -8,9 +8,11 @@ CCI Ticket Analyst — 메인 실행 파일
   python main.py --list-fields   # Jira 커스텀 필드 ID 목록 출력 (초기 설정용)
 """
 import argparse
+import os
 import re
 import sys
-from datetime import date
+import traceback
+from datetime import date, datetime, timezone, timedelta
 
 # Windows cp949 콘솔에서 Unicode 출력 시 인코딩 오류 방지
 sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -42,6 +44,41 @@ def _check_env():
         print(f"[오류] .env 파일에 다음 항목이 없습니다: {', '.join(missing)}")
         print("       .env.example 파일을 참고해서 .env를 만들어주세요.")
         sys.exit(1)
+
+
+_KST = timezone(timedelta(hours=9))
+
+
+def _notify_teams_error(cmd: str, exc: BaseException) -> None:
+    """분석 실패 시 Teams Incoming Webhook으로 알림 전송."""
+    import requests as _req
+    url = os.getenv("TEAMS_WEBHOOK_URL", "").strip()
+    if not url:
+        return
+    now = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
+    tb = traceback.format_exc()
+    # 스택 트레이스는 마지막 3줄만 포함 (길이 제한)
+    short_tb = "\n".join(tb.strip().splitlines()[-3:])
+    payload = {
+        "@type": "MessageCard",
+        "@context": "http://schema.org/extensions",
+        "themeColor": "FF0000",
+        "summary": f"[CCI Analyst] {cmd} 실패",
+        "sections": [{
+            "activityTitle": f"🚨 CCI Analyst 오류: `{cmd}`",
+            "activitySubtitle": now,
+            "facts": [
+                {"name": "오류 유형", "value": type(exc).__name__},
+                {"name": "메시지",   "value": str(exc)[:300]},
+                {"name": "위치",     "value": f"```{short_tb}```"},
+            ],
+            "markdown": True,
+        }],
+    }
+    try:
+        _req.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"[Teams 알림] 전송 실패: {e}")
 
 
 _TEST_SUMMARY_RE = re.compile(r'^\s*(brd\s*)?test\s*$', re.IGNORECASE)
@@ -246,16 +283,24 @@ if __name__ == "__main__":
                         help=f"테스트 모드: {_TEST_CYCLES[0]}·{_TEST_CYCLES[-1]}회차 티켓만 조회·분석")
     args = parser.parse_args()
 
-    if args.delete_page:
-        _check_env()
-        ConfluenceClient().delete_page(args.delete_page)
-    elif args.list_fields:
-        cmd_list_fields()
-    elif args.doc1 or args.doc1_daily:
-        cmd_doc1(as_of=args.timestamp, test_mode=args.test)
-    elif args.doc2 or args.doc2_daily:
-        cmd_doc2(as_of=args.timestamp, test_mode=args.test, use_cache=args.use_cache)
-    elif args.snapshot:
-        cmd_snapshot(force_cycle=args.force_cycle, as_of=args.timestamp)
-    elif args.all:
-        cmd_all(test_mode=args.test)
+    _cmd_label = " ".join(sys.argv[1:])  # 예: "--doc1 --test"
+
+    try:
+        if args.delete_page:
+            _check_env()
+            ConfluenceClient().delete_page(args.delete_page)
+        elif args.list_fields:
+            cmd_list_fields()
+        elif args.doc1 or args.doc1_daily:
+            cmd_doc1(as_of=args.timestamp, test_mode=args.test)
+        elif args.doc2 or args.doc2_daily:
+            cmd_doc2(as_of=args.timestamp, test_mode=args.test, use_cache=args.use_cache)
+        elif args.snapshot:
+            cmd_snapshot(force_cycle=args.force_cycle, as_of=args.timestamp)
+        elif args.all:
+            cmd_all(test_mode=args.test)
+    except Exception as exc:
+        print(f"[오류] {_cmd_label} 실행 중 예외 발생: {exc}", file=sys.stderr)
+        traceback.print_exc()
+        _notify_teams_error(_cmd_label, exc)
+        sys.exit(1)
