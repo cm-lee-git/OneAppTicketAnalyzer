@@ -71,21 +71,25 @@ LIGHT_GREY = "#f4f5f7"   # 종합 현황 데이터 셀
 KR_BLUE    = "#4c9aff"   # KR 열 헤더
 EU_TEAL    = "#79e2f2"   # EU 열 헤더
 HQ_GREEN   = "#57d9a3"   # HQ 열 헤더
-TOTAL_BLUE = "#deebff"   # 트래킹 Total 행 데이터
+TOTAL_BLUE  = "#deebff"   # 트래킹 Total 행 데이터
+
+# 셀프/AI 일치·불일치 셀 배경색 (승인 테이블 항목 분포 3열)
+MATCH_BG    = "#e3fcef"   # 일치 (초록)
+MISMATCH_BG = "#ffebe6"   # 불일치 (빨강)
 
 # 참조 문서(71237682) 기준 colgroup 너비
 CW = {
     "section1_overall":   [107, 159, 133, 133, 133, 133],      # 6열: 전체현황
     "section1_tracking":  [122, 108, 87, 92, 71, 90, 85, 106,  # 19열: 트래킹
                            83, 98, 81, 92, 92, 106, 87, 83, 92, 92, 92],
-    "kr_approved":        [104, 93, 101, 167, 93, 93, 93,       # 12열: KR 승인
-                           291, 93, 93, 93, 104],
+    "kr_approved":        [104, 93, 101, 167, 93, 93, 93,       # 13열: KR 승인 (항목|셀프|AI)
+                           291, 93, 90, 110, 93, 104],
     "kr_pending":         [208, 110, 110, 110, 110, 110,        # 12열: KR 보류
                            110, 110, 110, 180, 180, 110],
     "kr_rejected":        [200, 132, 132, 135, 132, 132,        # 9열: KR 반려
                            132, 132, 250],
-    "eu_approved":        [198, 122, 122, 122, 122, 122,        # 11열: EU 승인
-                           122, 122, 122, 122, 122],
+    "eu_approved":        [198, 122, 122, 122, 122, 122,        # 12열: EU 승인 (항목|셀프|AI)
+                           122, 122, 90, 110, 122, 122],
     "eu_pending":         [198, 122, 122, 122, 122, 122,        # 11열: EU 보류
                            122, 122, 155, 155, 110],
     "eu_rejected":        [198, 122, 122, 122, 122, 122,        # 8열: EU 반려
@@ -414,6 +418,7 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
 
     score_rows = ''.join(
         f'<tr><td><p>{SCORE_LABELS[i]}</p></td>'
+        f'<td><p>—</p></td>'
         f'<td><p>{_score_mark(scores.get(SCORE_KEYS[i], 0))}</p></td></tr>'
         for i in range(1, 6)
     )
@@ -440,6 +445,7 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
             f'{td_rs(t.get("created", ""))}{td_rs(t.get("due_date", ""))}'
             f'<td rowspan="6">{content_html}</td>'
             f'<td><p>{SCORE_LABELS[0]}</p></td>'
+            f'<td><p>—</p></td>'
             f'<td><p>{_score_mark(scores.get(SCORE_KEYS[0], 0))}</p></td>'
             f'{td_rs(priority)}{td_rs(brd_val)}</tr>'
         )
@@ -485,7 +491,7 @@ def _apply_history_filter_and_update(body_html: str, tickets_by_key: dict,
     from bs4 import BeautifulSoup as _BS
 
     EXPECTED_COLS = {
-        'approved': 12 if has_cycle_col else 11,
+        'approved': 13 if has_cycle_col else 12,
         'pending':  14 if has_cycle_col else 13,
         'rejected': 12 if has_cycle_col else 11,
     }
@@ -611,18 +617,21 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
 
     last_col = "CCI 안건 상정 여부" if is_prebrd else "BRD 승인 여부"
     if has_cycle_col:
-        # 항목 분포: 스코어 항목명(1열) + O/X값(1열) = colspan 2
-        header = _th_span([
-            ("#", 1, 1), ("회차", 1, 1), ("Key", 1, 1), ("Ticket Summary", 1, 1),
-            ("Reporter", 1, 1), ("Created", 1, 1), ("Due date", 1, 1), ("내용", 1, 1),
-            ("항목 분포", 1, 2), ("Priority 점수", 1, 1), (last_col, 1, 1),
+        # 항목 분포 3열(항목|셀프|AI), 2행 헤더
+        header1 = _th_span([
+            ("#", 2, 1), ("회차", 2, 1), ("Key", 2, 1), ("Ticket Summary", 2, 1),
+            ("Reporter", 2, 1), ("Created", 2, 1), ("Due date", 2, 1), ("내용", 2, 1),
+            ("항목 분포", 1, 3), ("Priority 점수", 2, 1), (last_col, 2, 1),
         ])
     else:
-        header = _th_span([
-            ("#", 1, 1), ("Key", 1, 1), ("Ticket Summary", 1, 1),
-            ("Reporter", 1, 1), ("Created", 1, 1), ("Due date", 1, 1), ("Summary", 1, 1),
-            ("항목 분포", 1, 2), ("Priority Score", 1, 1), (last_col, 1, 1),
+        header1 = _th_span([
+            ("#", 2, 1), ("Key", 2, 1), ("Ticket Summary", 2, 1),
+            ("Reporter", 2, 1), ("Created", 2, 1), ("Due date", 2, 1), ("Summary", 2, 1),
+            ("항목 분포", 1, 3), ("Priority Score", 2, 1), (last_col, 2, 1),
         ])
+    header2 = _th_span([
+        ("항목", 1, 1), ("셀프(요청자)", 1, 1), ("AI(7.2 초안)", 1, 1),
+    ])
 
     def td_rs(text, rs=6):
         return f'<td rowspan="{rs}"><p>{text}</p></td>'
@@ -639,21 +648,52 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
                 parts.append(f"<p><strong>&lt;{label}&gt;</strong></p><ul>{bullets}</ul>")
         return "".join(parts)
 
-    rows = [header]
+    def _score_td3(t, i):
+        """항목명 | 셀프 | AI(7.2 초안) 3개 셀 HTML."""
+        sco  = t.get("scores", {})
+        selfs = t.get("self_scores") or {}
+        det   = t.get("review_detail", {})
+        k  = SCORE_KEYS[i]
+        s  = selfs.get(k) if selfs else None
+        a  = _score_mark(sco.get(k, 0))
+        a_text = a + (f" ({det[k]})" if k in det else "")
+        if s is None:
+            return (f'<td><p>{SCORE_LABELS[i]}</p></td>'
+                    f'<td><p>—</p></td>'
+                    f'<td><p>{a_text}</p></td>')
+        bg = MATCH_BG if s == a else MISMATCH_BG
+        return (f'<td><p>{SCORE_LABELS[i]}</p></td>'
+                f'<td data-highlight-colour="{bg}"><p>{s}</p></td>'
+                f'<td data-highlight-colour="{bg}"><p>{a_text}</p></td>')
+
+    rows = [header1, header2]
     seq = 0
     for t in tickets:
         seq += 1
         key = t.get("key", "")
         created = t.get("created", "")
         if ref_rows and key in ref_rows:
-            _exp = 12 if has_cycle_col else 11
+            _exp = 13 if has_cycle_col else 12
             _act = _count_effective_cols_first_row(ref_rows[key])
             if _act == _exp:
                 rows.append(ref_rows[key])
                 continue
             print(f"  [ref 구조 불일치-승인] {key}: 예상 {_exp}열, 실제 {_act}열 → 재생성")
         scores = t.get("scores", {})
-        priority = str(sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0))
+        selfs  = t.get("self_scores") or {}
+
+        ai_total = sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0)
+        if selfs:
+            self_total = selfs.get('self_total', '')
+            matched    = sum(1 for k in SCORE_KEYS
+                            if selfs.get(k) and selfs.get(k) == _score_mark(scores.get(k, 0)))
+            comparable = sum(1 for k in SCORE_KEYS if selfs.get(k))
+            priority_td = (f'<td rowspan="6">'
+                           f'<p>셀프 {self_total} / AI {ai_total}</p>'
+                           f'<p>(항목 일치 {matched}/{comparable})</p></td>')
+        else:
+            priority_td = td_rs(str(ai_total))
+
         brd_val = "" if is_prebrd else APPROVAL_LABEL.get(_effective_approval(t), "")
         content_html = _content_html(t)
         cycle_col = f'<td rowspan="6"><p>{cycle_label(t.get("cycle_number", 0))}</p></td>' if has_cycle_col else ""
@@ -669,9 +709,8 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
             f'{td_rs(created)}'
             f'{td_rs(t.get("due_date", ""))}'
             f'<td rowspan="6">{content_html}</td>'
-            f'<td><p>{SCORE_LABELS[0]}</p></td>'
-            f'<td><p>{_score_mark(scores.get(SCORE_KEYS[0], 0))}</p></td>'
-            f'{td_rs(priority)}'
+            f'{_score_td3(t, 0)}'
+            f'{priority_td}'
             f'{td_rs(brd_val)}'
             f"</tr>"
         )
@@ -679,8 +718,7 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
         for i in range(1, 6):
             rows.append(
                 f"<tr>"
-                f'<td><p>{SCORE_LABELS[i]}</p></td>'
-                f'<td><p>{_score_mark(scores.get(SCORE_KEYS[i], 0))}</p></td>'
+                f'{_score_td3(t, i)}'
                 f"</tr>"
             )
 

@@ -33,10 +33,14 @@ TABLE_TITLE  = "New/Improvement"
 MASTER_TITLE = "KKR OneApp 주간 보고 (AI 생성)"
 SECTION_PRE  = "BRD 프로세스 적용 이전 (Pre-BRD)"
 SECTION_POST = "BRD 프로세스 적용 이후"
-TOTAL_COLS   = 12
+TOTAL_COLS   = 13   # 항목 분포: 항목|셀프(요청자)|AI(7.2 초안) 3열
 
-# 참조 문서(71139380)의 New/Improvement 표 열 너비 (px)
-COL_WIDTHS = [51, 70, 182, 242, 93, 100, 98, 475, 147, 129, 105, 107]
+# 셀프/AI 일치·불일치 셀 배경색
+MATCH_BG    = "#e3fcef"   # 일치 (초록)
+MISMATCH_BG = "#ffebe6"   # 불일치 (빨강)
+
+# 참조 문서(71139380)의 New/Improvement 표 열 너비 (px) — 항목 분포 2열→3열
+COL_WIDTHS = [51, 70, 182, 242, 93, 100, 98, 475, 147, 90, 110, 105, 107]
 
 JIRA_BROWSE = "https://hmg.atlassian.net/browse"
 
@@ -141,6 +145,14 @@ def _score_mark(value) -> str:
         return 'X'
 
 
+def _mark_td(soup: BeautifulSoup, text, bg: str = None, rowspan: int = 1, center: bool = False) -> Tag:
+    """배경색 강조 셀 — 셀프/AI 일치·불일치 표기용."""
+    cell = _td(soup, text, rowspan=rowspan, center=center)
+    if bg:
+        cell['data-highlight-colour'] = bg
+    return cell
+
+
 def _count_o(scores: dict) -> str:
     """Priority 점수 = 시급성 제외 5개 항목 중 O 개수."""
     keys = SCORE_KEYS[1:]
@@ -181,13 +193,14 @@ def _section_row(soup: BeautifulSoup, text: str, colour: str = "") -> Tag:
     return tr
 
 
-def _header_row(soup: BeautifulSoup) -> Tag:
+def _header_row(soup: BeautifulSoup) -> list:
+    """2행 헤더 반환: 1행=메인 컬럼, 2행=항목 분포 하위 컬럼(항목|셀프|AI)."""
     col_specs = [
         ('#', 1), ('Cycle', 1), ('Key', 1), ('Ticket Summary', 1),
         ('Reporter', 1), ('Created', 1), ('Due date', 1),
-        ('내용', 1), ('항목 분포', 2), ('Priority 점수', 1), ('BRD 승인 여부', 1),
+        ('내용', 1), ('항목 분포', 3), ('Priority 점수', 1), ('BRD 승인 여부', 1),
     ]
-    tr = soup.new_tag('tr')
+    tr1 = soup.new_tag('tr')
     for text, colspan in col_specs:
         th = soup.new_tag('th', style="padding: 14px 10px;")
         if colspan > 1:
@@ -195,8 +208,22 @@ def _header_row(soup: BeautifulSoup) -> Tag:
         p = soup.new_tag('p')
         p.string = text
         th.append(p)
-        tr.append(th)
-    return tr
+        tr1.append(th)
+
+    tr2 = soup.new_tag('tr')
+    for _ in range(8):                              # 앞 8열: 빈 헤더
+        th = soup.new_tag('th', style="padding: 6px 10px;")
+        tr2.append(th)
+    for sub in ('항목', '셀프(요청자)', 'AI(7.2 초안)'):
+        th = soup.new_tag('th', style="padding: 6px 10px;")
+        p = soup.new_tag('p')
+        p.string = sub
+        th.append(p)
+        tr2.append(th)
+    for _ in range(2):                              # Priority 점수 + BRD 승인 여부
+        th = soup.new_tag('th', style="padding: 6px 10px;")
+        tr2.append(th)
+    return [tr1, tr2]
 
 
 def _make_table(soup: BeautifulSoup) -> tuple[Tag, Tag]:
@@ -340,6 +367,11 @@ def _fill_pre_brd_content_cell(cell: Tag, ticket: dict, soup: BeautifulSoup):
         _append_section(cell, soup, feature_label, feature)
 
 
+def _fill_content_cell(cell: Tag, ticket: dict, soup: BeautifulSoup):
+    """render_sample 호환 alias → _fill_post_brd_content_cell."""
+    _fill_post_brd_content_cell(cell, ticket, soup)
+
+
 def _fill_post_brd_content_cell(cell: Tag, ticket: dict, soup: BeautifulSoup):
     """Post-BRD 내용 셀: AI Doc1 서식 기준
     - <Status> 태그 유지
@@ -405,7 +437,9 @@ def _build_pre_brd_block(soup: BeautifulSoup, ticket: dict, seq_num: int) -> lis
     _fill_pre_brd_content_cell(content_td, ticket, soup)
     tr1.append(content_td)
 
+    # 항목 분포 3열: 항목 | — (셀프 없음) | O/X
     tr1.append(_td(soup, SCORE_LABELS[0]))
+    tr1.append(_td(soup, '—'))
     tr1.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[0], 0))))
     tr1.append(_td(soup, priority_text, rowspan=6, center=True))
     tr1.append(_td(soup, brd_text, rowspan=6, center=True))
@@ -414,6 +448,7 @@ def _build_pre_brd_block(soup: BeautifulSoup, ticket: dict, seq_num: int) -> lis
     for i in range(1, 6):
         tr = soup.new_tag('tr')
         tr.append(_td(soup, SCORE_LABELS[i]))
+        tr.append(_td(soup, '—'))
         tr.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[i], 0))))
         rows.append(tr)
 
@@ -422,10 +457,32 @@ def _build_pre_brd_block(soup: BeautifulSoup, ticket: dict, seq_num: int) -> lis
 
 def _build_post_brd_normal_block(soup: BeautifulSoup, ticket: dict,
                                   seq_num: int) -> list[Tag]:
-    """Post-BRD 일반 6행 블록 — AI Doc1 서식."""
+    """Post-BRD 일반 6행 블록 — 항목 분포 3열(항목|셀프|AI), 셀프/AI 색상 비교."""
     scores = ticket.get('scores', {})
-    priority_text = _count_o(scores)
+    selfs  = ticket.get('self_scores') or {}
+    det    = ticket.get('review_detail', {})
     brd_text = _effective_brd(ticket, include_brd=True)
+
+    ai_total = sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0)
+
+    if selfs:
+        self_total = selfs.get('self_total', '')
+        matched    = sum(1 for k in SCORE_KEYS
+                        if selfs.get(k) and selfs.get(k) == _score_mark(scores.get(k, 0)))
+        comparable = sum(1 for k in SCORE_KEYS if selfs.get(k))
+        priority_text = f"셀프 {self_total} / AI {ai_total}\n(항목 일치 {matched}/{comparable})"
+    else:
+        priority_text = str(ai_total)
+
+    def _row_cells(i):
+        key = SCORE_KEYS[i]
+        s = selfs.get(key) if selfs else None   # 'O' | 'X' | None
+        a = _score_mark(scores.get(key, 0))
+        a_text = a + (f" ({det[key]})" if key in det else "")
+        if s is None:
+            return [_td(soup, SCORE_LABELS[i]), _mark_td(soup, '—'), _mark_td(soup, a_text)]
+        bg = MATCH_BG if s == a else MISMATCH_BG
+        return [_td(soup, SCORE_LABELS[i]), _mark_td(soup, s, bg), _mark_td(soup, a_text, bg)]
 
     rows = []
     tr1 = soup.new_tag('tr')
@@ -442,16 +499,24 @@ def _build_post_brd_normal_block(soup: BeautifulSoup, ticket: dict,
     _fill_post_brd_content_cell(content_td, ticket, soup)
     tr1.append(content_td)
 
-    tr1.append(_td(soup, SCORE_LABELS[0]))
-    tr1.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[0], 0))))
-    tr1.append(_td(soup, priority_text, rowspan=6, center=True))
+    # Priority 점수 셀 — 멀티라인 지원
+    pt = soup.new_tag('td', style="padding: 14px 10px; line-height: 1.6;")
+    pt['rowspan'] = '6'
+    for line in priority_text.split('\n'):
+        p = soup.new_tag('p')
+        p.string = line
+        pt.append(p)
+
+    for c in _row_cells(0):
+        tr1.append(c)
+    tr1.append(pt)
     tr1.append(_td(soup, brd_text, rowspan=6, center=True))
     rows.append(tr1)
 
     for i in range(1, 6):
         tr = soup.new_tag('tr')
-        tr.append(_td(soup, SCORE_LABELS[i]))
-        tr.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[i], 0))))
+        for c in _row_cells(i):
+            tr.append(c)
         rows.append(tr)
 
     return rows
@@ -478,9 +543,9 @@ def _build_fast_track_block(soup: BeautifulSoup, ticket: dict,
     tr1.append(_td(soup, ticket.get('created', ''), rowspan=2))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-', rowspan=2))
     tr1.append(content_td)
-    # 항목 분포 2열 span (빈 셀)
+    # 항목 분포 3열 span (빈 셀)
     empty_dist = soup.new_tag('td')
-    empty_dist['colspan'] = '2'
+    empty_dist['colspan'] = '3'
     empty_dist['rowspan'] = '2'
     p_empty = soup.new_tag('p')
     p_empty.string = ''
@@ -540,9 +605,9 @@ def _build_group_ticket_block(soup: BeautifulSoup, ticket: dict,
     tr1.append(_td(soup, ticket.get('created', ''), rowspan=2))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-', rowspan=2))
     tr1.append(content_td)
-    # 항목 분포 2열 span (빈 셀)
+    # 항목 분포 3열 span (빈 셀)
     empty_dist = soup.new_tag('td')
-    empty_dist['colspan'] = '2'
+    empty_dist['colspan'] = '3'
     empty_dist['rowspan'] = '2'
     p_empty = soup.new_tag('p')
     p_empty.string = ''
@@ -568,12 +633,19 @@ def _build_post_brd_block(soup: BeautifulSoup, ticket: dict,
     return _build_post_brd_normal_block(soup, ticket, seq_num)
 
 
+def _build_ticket_block(soup: BeautifulSoup, ticket: dict,
+                         seq_num: int, include_brd: bool = True) -> list[Tag]:
+    """render_sample 호환 alias → _build_post_brd_block."""
+    return _build_post_brd_block(soup, ticket, seq_num)
+
+
 # ─── 표 빌더 ─────────────────────────────────────────────────────────────────
 
 def _build_pre_brd_table(soup: BeautifulSoup, pre_brd: list[dict],
                           ref_rows: dict | None = None) -> Tag:
     table, tbody = _make_table(soup)
-    tbody.append(_header_row(soup))
+    for hr in _header_row(soup):
+        tbody.append(hr)
     seq = 0
     for ticket in pre_brd:
         seq += 1
@@ -595,7 +667,8 @@ def _build_pre_brd_table(soup: BeautifulSoup, pre_brd: list[dict],
 def _build_post_brd_table(soup: BeautifulSoup, post_brd: list[dict],
                            offset: int, ref_rows: dict | None = None) -> Tag:
     table, tbody = _make_table(soup)
-    tbody.append(_header_row(soup))
+    for hr in _header_row(soup):
+        tbody.append(hr)
     seq = offset
     for ticket in post_brd:
         seq += 1

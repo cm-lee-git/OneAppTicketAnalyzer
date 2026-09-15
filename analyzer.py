@@ -75,6 +75,9 @@ def _call_claude(system_prompt: str, user_msg: str) -> str:
     return resp.json()["content"][0]["text"].strip()
 
 
+_V2_PROMPT_PATH = pathlib.Path(__file__).parent / "prompts" / "scoring_v2_system_prompt.md"
+_USE_V2 = os.getenv("SCORING_PROMPT_VERSION", "v1") == "v2"
+
 SYSTEM_PROMPT = """당신은 INNOCEAN GBCXD팀의 CCI Digital Platform 티켓 분석 전문가입니다.
 Jira 티켓 정보를 받아 아래 JSON 형식으로만 응답하세요. 설명이나 마크다운은 절대 포함하지 마세요.
 
@@ -289,6 +292,15 @@ R1~R4 중 해당하는 코드만 작성. 해당 없으면 null (R5 사용 금지
 - R4: 글로벌 BPM 방향성 또는 리더십 결정 사항과 배치 (댓글 내용에서 근거 확인)
 """
 
+# v2 프롬프트 오버라이드 (SCORING_PROMPT_VERSION=v2 환경변수 시)
+if _USE_V2 and _V2_PROMPT_PATH.exists():
+    try:
+        _v2_raw = _V2_PROMPT_PATH.read_text(encoding="utf-8")
+        SYSTEM_PROMPT = _v2_raw.split("<!-- PROMPT_START -->", 1)[1]
+        print("[analyzer] v2 스코어링 프롬프트 로드 완료")
+    except Exception as _e:
+        print(f"[analyzer] v2 프롬프트 로드 실패: {_e} → v1 사용")
+
 
 def analyze_ticket(ticket: dict,
                    other_tickets: list[tuple[str, str]] | None = None,
@@ -336,9 +348,38 @@ BRD 상태: {ticket['brd_status_raw']}
         end = raw.rfind("}") + 1
         parsed = json.loads(raw[start:end])
 
+    # v2 출력 처리: review → backward-compat scores + review_detail
+    if "review" in parsed:
+        rev = parsed["review"]
+        parsed["scores"] = {
+            "urgency":                rev["urgency"]["fast_track"],
+            "business_performance":   1 if rev["business_performance"]["mark"] == "O" else 0,
+            "customer_experience":    1 if rev["customer_experience"]["mark"] == "O" else 0,
+            "operational_efficiency": 1 if rev["operational_efficiency"]["mark"] == "O" else 0,
+            "global_reach":           rev["global_reach"]["score"],
+            "platform_strategy":      1 if rev["platform_strategy"]["mark"] == "O" else 0,
+        }
+        # review_detail: 셀 보조 표기용 (urgency 하위 지표, global_reach MAU/수혜국가)
+        det = {}
+        u = rev["urgency"]
+        u_hits = ([("장애" if u["critical_incident"]["mark"] == "O" else ""),
+                   ("법규" if u["legal_compliance"]["mark"] == "O" else ""),
+                   ("리더십" if u["leadership_decision"]["mark"] == "O" else "")])
+        u_hits = [x for x in u_hits if x]
+        if u_hits:
+            det["urgency"] = " · ".join(u_hits) + " O"
+        gr = rev["global_reach"]
+        det["global_reach"] = f"MAU {gr['mau']['mark']} · 수혜국가 {gr['coverage']['mark']}"
+        ps_kpi = rev["platform_strategy"].get("kpi", "")
+        if ps_kpi and ps_kpi != "해당 없음":
+            det["platform_strategy"] = ps_kpi.split("|")[0].strip()
+        parsed["review_detail"] = det
+        parsed["priority_score"] = rev.get("total", 0)
+
     scores = parsed.get("scores", {})
-    priority = int(sum(scores.get(k, 0) for k in SCORE_KEYS_FOR_PRIORITY))
-    parsed["priority_score"] = priority
+    if "priority_score" not in parsed:
+        priority = int(sum(scores.get(k, 0) for k in SCORE_KEYS_FOR_PRIORITY))
+        parsed["priority_score"] = priority
 
     # R1 자동 판별: urgency=0 AND priority_score=0 → rejection_code 강제 R1
     if (parsed.get("rejection_code") is None and
