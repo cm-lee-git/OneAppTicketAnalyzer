@@ -649,18 +649,8 @@ def _build_pre_brd_table(soup: BeautifulSoup, pre_brd: list[dict],
     seq = 0
     for ticket in pre_brd:
         seq += 1
-        key = ticket.get('key', '')
-        if ref_rows and key in ref_rows:
-            # 참조 문서 행 복사 — Ticket Summary는 항상 Jira 원본 타이틀로 덮어씀
-            for i, row_html in enumerate(ref_rows[key]):
-                tr = BeautifulSoup(row_html, 'html.parser').find('tr')
-                if tr:
-                    if i == 0:
-                        _patch_ticket_summary(tr, ticket.get('summary', ''), soup)
-                    tbody.append(tr)
-        else:
-            for row in _build_pre_brd_block(soup, ticket, seq):
-                tbody.append(row)
+        for row in _build_pre_brd_block(soup, ticket, seq):
+            tbody.append(row)
     return table
 
 
@@ -672,18 +662,8 @@ def _build_post_brd_table(soup: BeautifulSoup, post_brd: list[dict],
     seq = offset
     for ticket in post_brd:
         seq += 1
-        key = ticket.get('key', '')
-        if ref_rows and key in ref_rows:
-            # 참조 문서 행 복사 — Ticket Summary는 항상 Jira 원본 타이틀로 덮어씀
-            for i, row_html in enumerate(ref_rows[key]):
-                tr = BeautifulSoup(row_html, 'html.parser').find('tr')
-                if tr:
-                    if i == 0:
-                        _patch_ticket_summary(tr, ticket.get('summary', ''), soup)
-                    tbody.append(tr)
-        else:
-            for row in _build_post_brd_block(soup, ticket, seq):
-                tbody.append(row)
+        for row in _build_post_brd_block(soup, ticket, seq):
+            tbody.append(row)
     return table
 
 
@@ -922,10 +902,78 @@ def _find_weekly_page(client: ConfluenceClient,
     return None, 0
 
 
+# ─── 변경 감지 / 서브페이지 ──────────────────────────────────────────────────
+
+def _detect_ticket_changes(kr_tickets: list[dict], prev_tickets: list[dict]) -> dict:
+    """현재 KR 티켓 vs 이전 실행 전체 티켓 비교. 신규/상태변경 분류."""
+    prev_map = {t.get('key'): t for t in prev_tickets if t.get('key')}
+    new_tickets: list = []
+    changed_tickets: list = []
+    for t in kr_tickets:
+        key = t.get('key')
+        if not key:
+            continue
+        pt = prev_map.get(key)
+        if pt is None:
+            new_tickets.append(t)
+        else:
+            curr_eff = _effective_brd(t, include_brd=True)
+            prev_eff = _effective_brd(pt, include_brd=True)
+            curr_status = t.get('status', '')
+            prev_status = pt.get('status', '')
+            diffs: dict = {}
+            if curr_eff and prev_eff and curr_eff != prev_eff:
+                diffs['brd'] = {'from': prev_eff, 'to': curr_eff}
+            if curr_status and prev_status and curr_status != prev_status:
+                diffs['status'] = {'from': prev_status, 'to': curr_status}
+            if diffs:
+                changed_tickets.append({'ticket': t, 'changes': diffs})
+    return {'new': new_tickets, 'changed': changed_tickets}
+
+
+def _build_changes_subpage_html(changes: dict, timestamp: str) -> str:
+    """일별 변경사항 서브페이지 HTML."""
+    new_tickets = changes.get('new', [])
+    changed_tickets = changes.get('changed', [])
+    parts = [f'<p><em>{timestamp} 기준 변경사항</em></p>']
+    if not new_tickets and not changed_tickets:
+        parts.append('<p>변경사항 없음</p>')
+        return '\n'.join(parts)
+    if new_tickets:
+        parts.append(f'<h2>신규 티켓 ({len(new_tickets)}건)</h2><ul>')
+        for t in sorted(new_tickets, key=lambda x: x.get('created', '')):
+            key = t.get('key', '')
+            eff = _effective_brd(t, include_brd=True)
+            parts.append(
+                f'<li><a href="{JIRA_BROWSE}/{key}">{key}</a> — {t.get("summary", "")}'
+                f' | {cycle_label(t.get("cycle_number", 0))}'
+                + (f' | {eff}' if eff else '') + '</li>'
+            )
+        parts.append('</ul>')
+    if changed_tickets:
+        parts.append(f'<h2>상태 변경 ({len(changed_tickets)}건)</h2><ul>')
+        for item in changed_tickets:
+            t = item['ticket']
+            ch = item['changes']
+            key = t.get('key', '')
+            desc = []
+            if 'brd' in ch:
+                desc.append(f"BRD: {ch['brd']['from']} → {ch['brd']['to']}")
+            if 'status' in ch:
+                desc.append(f"상태: {ch['status']['from']} → {ch['status']['to']}")
+            parts.append(
+                f'<li><a href="{JIRA_BROWSE}/{key}">{key}</a> — {t.get("summary", "")}'
+                f' | {", ".join(desc)}</li>'
+            )
+        parts.append('</ul>')
+    return '\n'.join(parts)
+
+
 # ─── 전체 재빌드 ─────────────────────────────────────────────────────────────
 
 def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = None,
-           as_of: str | None = None, jira_client=None):
+           as_of: str | None = None, jira_client=None,
+           prev_tickets: list[dict] | None = None):
     if client is None:
         client = ConfluenceClient()
 
@@ -1035,5 +1083,21 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
         print(f"[Doc1] 주간 페이지 업데이트 ({page_title}: {len(kr_tickets)}건, id={page_id})")
     else:
         result = client.create_page(DOC_PAGE_IDS["doc1"], page_title, str(soup))
-        new_id = result.get("id", "")
-        print(f"[Doc1] 주간 페이지 생성 ({page_title}: {len(kr_tickets)}건, id={new_id})")
+        page_id = result.get("id", "")
+        print(f"[Doc1] 주간 페이지 생성 ({page_title}: {len(kr_tickets)}건, id={page_id})")
+
+    # 일별 변경사항 서브페이지 (이전 실행 데이터가 있을 때만)
+    if prev_tickets and page_id:
+        changes = _detect_ticket_changes(kr_tickets, prev_tickets)
+        today = date.today()
+        sub_title = f"{today.month}/{today.day} 업데이트"
+        sub_html = _build_changes_subpage_html(changes, now.strftime('%Y-%m-%d %H:%M'))
+        sub_id, sub_ver = _find_weekly_page(client, page_id, sub_title)
+        if sub_id:
+            client.update_page(sub_id, sub_title, sub_html, sub_ver,
+                               message=f"{timestamp} 재업데이트")
+        else:
+            client.create_page(page_id, sub_title, sub_html)
+        total_ch = len(changes['new']) + len(changes['changed'])
+        print(f"[Doc1] 변경사항 서브페이지 {'업데이트' if sub_id else '생성'}: {sub_title} "
+              f"(신규 {len(changes['new'])}건, 변경 {len(changes['changed'])}건)")

@@ -193,23 +193,38 @@ def _apply_test_cycle_filter(tickets: list[dict]) -> list[dict]:
     return result
 
 
+def _load_prev_tickets(cache_path: str = "tickets_analyzed_latest.json") -> list[dict]:
+    """분석 전 이전 캐시 로드 (변경 감지용). 없으면 빈 리스트 반환."""
+    import json
+    import pathlib
+    p = pathlib.Path(cache_path)
+    if p.exists():
+        try:
+            return json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return []
+
+
 def cmd_doc1(as_of: str | None = None, test_mode: bool = False):
-    """평일: 전체 티켓 분석 후 마스터 페이지 업데이트 + 스냅샷 생성."""
+    """평일: 전체 티켓 분석 후 주간 페이지 업데이트 + 일별 변경사항 서브페이지."""
     _check_env()
     jira = JiraClient()
     jql = _build_test_jql() if test_mode else _get_weekly_jql()
+    prev_tickets = _load_prev_tickets()
     tickets = _fetch_and_analyze(
         extra_jql=jql,
         save_path="tickets_analyzed_latest.json",
     )
     if test_mode:
         tickets = _apply_test_cycle_filter(tickets)
-    doc1_updater.update(tickets, ConfluenceClient(), as_of=as_of, jira_client=jira)
+    doc1_updater.update(tickets, ConfluenceClient(), as_of=as_of, jira_client=jira,
+                        prev_tickets=prev_tickets)
 
 
 def cmd_doc2(as_of: str | None = None, test_mode: bool = False,
              use_cache: bool = False):
-    """평일: 전체 티켓 분석 후 마스터 페이지 업데이트 + 스냅샷 생성.
+    """평일: 전체 티켓 분석 후 마스터 페이지 업데이트 + 일별 변경사항 서브페이지.
 
     use_cache: True이면 tickets_analyzed_latest.json 재사용 (Claude 분석 생략).
     """
@@ -218,6 +233,7 @@ def cmd_doc2(as_of: str | None = None, test_mode: bool = False,
     jql = _build_test_jql() if test_mode else _get_weekly_jql()
 
     cache_path = pathlib.Path("tickets_analyzed_latest.json")
+    prev_tickets = _load_prev_tickets()
     if use_cache and cache_path.exists():
         print(f"[Doc2] 캐시 사용 → {cache_path} ({cache_path.stat().st_size // 1024}KB)")
         tickets = json.loads(cache_path.read_text(encoding="utf-8"))
@@ -231,7 +247,7 @@ def cmd_doc2(as_of: str | None = None, test_mode: bool = False,
         if test_mode:
             tickets = _apply_test_cycle_filter(tickets)
 
-    doc2_updater.update(tickets, ConfluenceClient(), as_of=as_of)
+    doc2_updater.update(tickets, ConfluenceClient(), as_of=as_of, prev_tickets=prev_tickets)
 
 
 def cmd_snapshot(force_cycle=None, as_of: str | None = None):
@@ -244,6 +260,7 @@ def cmd_all(test_mode: bool = False):
     _check_env()
     jira = JiraClient()
     jql = _build_test_jql() if test_mode else _get_weekly_jql()
+    prev_tickets = _load_prev_tickets()
     tickets = _fetch_and_analyze(
         extra_jql=jql,
         save_path="tickets_analyzed_latest.json",
@@ -251,8 +268,8 @@ def cmd_all(test_mode: bool = False):
     if test_mode:
         tickets = _apply_test_cycle_filter(tickets)
     client = ConfluenceClient()
-    doc1_updater.update(tickets, client, jira_client=jira)
-    doc2_updater.update(tickets, client)
+    doc1_updater.update(tickets, client, jira_client=jira, prev_tickets=prev_tickets)
+    doc2_updater.update(tickets, client, prev_tickets=prev_tickets)
 
 
 def _cmd_doc2_daily_compat(as_of, from_date, use_cache, test_mode):

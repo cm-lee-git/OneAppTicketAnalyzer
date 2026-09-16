@@ -1211,9 +1211,9 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
     for cycle_title, body_html in _fill_missing_cycles(region_hist.get('Approved', []), active_cycle):
         updated = _apply_history_filter_and_update(body_html, tbk, has_cycle_col, 'approved')
         parts.append(_expand(cycle_title, updated))
-    # 현재 회차
+    # 현재 회차 — 항상 fresh 분석 데이터 사용 (ref_rows 우회 없음)
     parts.append(_expand(_cycle_expand_title(active_cycle),
-        _build_approved_table(_filter("Approved"), approved_widths, has_cycle_col, ref_rows=ref_rows)))
+        _build_approved_table(_filter("Approved"), approved_widths, has_cycle_col, ref_rows=None)))
 
     # ── 보류 티켓 ──
     parts.append(_p_bold(f"{section_num}.2. 보류 티켓"))
@@ -1221,9 +1221,9 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
     for cycle_title, body_html in _fill_missing_cycles(region_hist.get('보류', []), active_cycle):
         updated = _apply_history_filter_and_update(body_html, tbk, has_cycle_col, 'pending')
         parts.append(_expand(cycle_title, updated))
-    # 현재 회차
+    # 현재 회차 — 항상 fresh 분석 데이터 사용
     parts.append(_expand(_cycle_expand_title(active_cycle),
-        _build_pending_table(_filter("보류"), pending_widths, has_cycle_col, ref_rows=ref_rows)))
+        _build_pending_table(_filter("보류"), pending_widths, has_cycle_col, ref_rows=None)))
 
     # ── 반려 티켓 ──
     parts.append(_p_bold(f"{section_num}.3. 반려 티켓"))
@@ -1231,11 +1231,107 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
     for cycle_title, body_html in _fill_missing_cycles(region_hist.get('반려', []), active_cycle):
         updated = _apply_history_filter_and_update(body_html, tbk, has_cycle_col, 'rejected')
         parts.append(_expand(cycle_title, updated))
-    # 현재 회차
+    # 현재 회차 — 항상 fresh 분석 데이터 사용
     parts.append(_expand(_cycle_expand_title(active_cycle),
-        _build_rejected_table(_filter("반려"), rejected_widths, has_cycle_col, ref_rows=ref_rows)))
+        _build_rejected_table(_filter("반려"), rejected_widths, has_cycle_col, ref_rows=None)))
 
     return parts
+
+
+# ── 변경 감지 / 서브페이지 ──────────────────────────────────────
+
+def _detect_doc2_changes(current: list[dict], prev: list[dict]) -> dict:
+    """현재 전체 티켓 vs 이전 실행 티켓 비교. 신규/상태변경 분류 (전 권역)."""
+    prev_map = {t.get('key'): t for t in prev if t.get('key')}
+    new_tickets: list = []
+    changed_tickets: list = []
+    for t in current:
+        key = t.get('key')
+        if not key:
+            continue
+        pt = prev_map.get(key)
+        if pt is None:
+            new_tickets.append(t)
+        else:
+            curr_eff = _effective_approval(t)
+            prev_eff = _effective_approval(pt)
+            curr_status = t.get('status', '')
+            prev_status = pt.get('status', '')
+            diffs: dict = {}
+            if curr_eff and prev_eff and curr_eff != prev_eff:
+                diffs['brd'] = {'from': APPROVAL_LABEL.get(prev_eff, prev_eff),
+                                'to':   APPROVAL_LABEL.get(curr_eff, curr_eff)}
+            if curr_status and prev_status and curr_status != prev_status:
+                diffs['status'] = {'from': prev_status, 'to': curr_status}
+            if diffs:
+                region = t.get('region', '')
+                changed_tickets.append({'ticket': t, 'changes': diffs, 'region': region})
+    return {'new': new_tickets, 'changed': changed_tickets}
+
+
+def _build_doc2_changes_subpage_html(changes: dict, timestamp: str) -> str:
+    """Doc2 일별 변경사항 서브페이지 HTML."""
+    new_tickets = changes.get('new', [])
+    changed_tickets = changes.get('changed', [])
+    parts = [f'<p><em>{timestamp} 기준 변경사항</em></p>']
+    if not new_tickets and not changed_tickets:
+        parts.append('<p>변경사항 없음</p>')
+        return '\n'.join(parts)
+    if new_tickets:
+        parts.append(f'<h2>신규 티켓 ({len(new_tickets)}건)</h2><ul>')
+        for t in sorted(new_tickets, key=lambda x: (x.get('region', ''), x.get('created', ''))):
+            key = t.get('key', '')
+            region = REGION_LABEL.get(t.get('region', ''), t.get('region', ''))
+            eff = APPROVAL_LABEL.get(_effective_approval(t), '')
+            parts.append(
+                f'<li><a href="{JIRA_BROWSE}/{key}">{key}</a> — {t.get("summary", "")}'
+                f' | {region} | {cycle_label(t.get("cycle_number", 0))}'
+                + (f' | {eff}' if eff else '') + '</li>'
+            )
+        parts.append('</ul>')
+    if changed_tickets:
+        parts.append(f'<h2>상태 변경 ({len(changed_tickets)}건)</h2><ul>')
+        for item in sorted(changed_tickets, key=lambda x: x.get('region', '')):
+            t = item['ticket']
+            ch = item['changes']
+            key = t.get('key', '')
+            region = REGION_LABEL.get(t.get('region', ''), t.get('region', ''))
+            desc = []
+            if 'brd' in ch:
+                desc.append(f"BRD: {ch['brd']['from']} → {ch['brd']['to']}")
+            if 'status' in ch:
+                desc.append(f"상태: {ch['status']['from']} → {ch['status']['to']}")
+            parts.append(
+                f'<li><a href="{JIRA_BROWSE}/{key}">{key}</a> — {t.get("summary", "")}'
+                f' | {region} | {", ".join(desc)}</li>'
+            )
+        parts.append('</ul>')
+    return '\n'.join(parts)
+
+
+def _find_child_page_by_title(client: ConfluenceClient,
+                               parent_id: str, title: str) -> tuple[str | None, int]:
+    """부모 페이지 하위에서 제목 일치 페이지 탐색. 반환: (page_id, version)"""
+    cursor: str | None = None
+    while True:
+        params: dict = {"parentId": parent_id, "limit": 50}
+        if cursor:
+            params["cursor"] = cursor
+        data = client._get("/pages", params=params)
+        for page in data.get("results", []):
+            if page["title"] == title:
+                _, version, _ = client.get_page_storage(page["id"])
+                return page["id"], version
+        nxt = data.get("_links", {}).get("next", "")
+        if not nxt:
+            break
+        for part in nxt.split("&"):
+            if "cursor=" in part:
+                cursor = part.split("cursor=")[-1]
+                break
+        else:
+            break
+    return None, 0
 
 
 # ── 마스터 페이지 헬퍼 ──────────────────────────────────────────
@@ -1277,7 +1373,8 @@ def _create_snapshot(client: ConfluenceClient, master_id: str,
 
 
 # ── 메인 업데이트 함수 ──────────────────────────────────────────
-def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = None, as_of: str | None = None):
+def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = None,
+           as_of: str | None = None, prev_tickets: list[dict] | None = None):
     if client is None:
         client = ConfluenceClient()
 
@@ -1320,12 +1417,24 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     timestamp = as_of if as_of else now.strftime("%m-%d %H:%M")
     master_id, current_html, current_version = _find_master_page(client, DOC_PAGE_IDS["doc2"])
     if master_id:
-        if current_html and current_html.strip():
-            _create_snapshot(client, master_id, current_html, timestamp)
         client.update_page(master_id, MASTER_TITLE, html, current_version,
                            message=f"{timestamp} 업데이트: {len(tickets_with_analysis)}건")
         print(f"[Doc2] 마스터 페이지 업데이트 완료 (총 {len(tickets_with_analysis)}건, id={master_id})")
     else:
         result = client.create_page(DOC_PAGE_IDS["doc2"], MASTER_TITLE, html)
-        new_id = result.get("id", "")
-        print(f"[Doc2] 마스터 페이지 최초 생성 (총 {len(tickets_with_analysis)}건, id={new_id})")
+        master_id = result.get("id", "")
+        print(f"[Doc2] 마스터 페이지 최초 생성 (총 {len(tickets_with_analysis)}건, id={master_id})")
+
+    # 일별 변경사항 서브페이지 (이전 실행 데이터가 있을 때만)
+    if prev_tickets and master_id:
+        changes = _detect_doc2_changes(tickets_with_analysis, prev_tickets)
+        sub_title = f"{now.month}/{now.day} 업데이트"
+        sub_html = _build_doc2_changes_subpage_html(changes, now.strftime('%Y-%m-%d %H:%M'))
+        sub_id, sub_ver = _find_child_page_by_title(client, master_id, sub_title)
+        if sub_id:
+            client.update_page(sub_id, sub_title, sub_html, sub_ver,
+                               message=f"{timestamp} 재업데이트")
+        else:
+            client.create_page(master_id, sub_title, sub_html)
+        print(f"[Doc2] 변경사항 서브페이지 {'업데이트' if sub_id else '생성'}: {sub_title} "
+              f"(신규 {len(changes['new'])}건, 변경 {len(changes['changed'])}건)")
