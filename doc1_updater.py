@@ -7,7 +7,7 @@ Document 1: KKR OneApp 주간 보고 (AI 생성) — Full Rebuild Updater
 """
 import json
 import os
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from bs4 import BeautifulSoup, Tag
 from confluence_client import ConfluenceClient, HmgConfluenceClient
 from config import DOC_PAGE_IDS, HMG_DOC1_FOLDER_3Q, HMG_DOC1_FOLDER_Q4
@@ -890,6 +890,38 @@ def _create_snapshot(client: ConfluenceClient, master_id: str,
         print(f"[Doc1] 스냅샷 생성 실패 (계속 진행): {e}")
 
 
+def _get_weekly_page_title() -> str:
+    """이번 주 월요일 날짜 기반 Doc1 페이지 제목. 형식: 'M/D KKR OneApp'"""
+    today = date.today()
+    monday = today - timedelta(days=today.weekday())
+    return f"{monday.month}/{monday.day} KKR OneApp"
+
+
+def _find_weekly_page(client: ConfluenceClient,
+                      folder_id: str, title: str) -> tuple[str | None, int]:
+    """폴더 내 title과 일치하는 주간 페이지 탐색. 반환: (page_id, version)"""
+    cursor: str | None = None
+    while True:
+        params: dict = {"parentId": folder_id, "limit": 50}
+        if cursor:
+            params["cursor"] = cursor
+        data = client._get("/pages", params=params)
+        for page in data.get("results", []):
+            if page["title"] == title:
+                _, version, _ = client.get_page_storage(page["id"])
+                return page["id"], version
+        nxt = data.get("_links", {}).get("next", "")
+        if not nxt:
+            break
+        for part in nxt.split("&"):
+            if "cursor=" in part:
+                cursor = part.split("cursor=")[-1]
+                break
+        else:
+            break
+    return None, 0
+
+
 # ─── 전체 재빌드 ─────────────────────────────────────────────────────────────
 
 def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = None,
@@ -899,13 +931,14 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
 
     active_cycle = get_active_cycle()
 
-    # 오버라이드 적용 → KR 권역, 현재 회차만
+    # 오버라이드 적용 → KR 권역, 전체 회차 포함
     all_tickets = _apply_overrides(tickets_with_analysis)
     kr_tickets = [t for t in all_tickets if t.get("region") == "KR"]
-    current_tickets = sorted(
-        [t for t in kr_tickets if t.get("cycle_number", 0) == active_cycle],
-        key=lambda t: t.get("created", "")
-    )
+
+    # Pre-BRD / Post-BRD 분리
+    pre_brd, post_brd = _split_tickets(kr_tickets)
+    all_post_cycles = sorted({t.get('cycle_number', 0) for t in post_brd if t.get('cycle_number', 0) > 0})
+    current_tickets = [t for t in post_brd if t.get('cycle_number', 0) == active_cycle]
 
     # Feature 1: HMG Confluence에서 이전 티켓 행 추출
     hmg_client = HmgConfluenceClient()
@@ -918,7 +951,7 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     note_p = soup.new_tag('p')
     em_tag = soup.new_tag('em')
     em_tag.string = (f"{now.strftime('%Y-%m-%d %H:%M')} 업데이트 "
-                     f"({active_cycle}회차 {len(current_tickets)}건)")
+                     f"({active_cycle}회차 기준, 총 {len(kr_tickets)}건, 이번 회차 {len(current_tickets)}건)")
     note_p.append(em_tag)
     soup.append(note_p)
 
@@ -929,17 +962,34 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
         '</ac:structured-macro>', 'html.parser')
     soup.append(toc)
 
-    # h1
+    # h1: New/Improvement
     h1 = soup.new_tag('h1')
     h1.string = TABLE_TITLE
     soup.append(h1)
 
-    # h2: 현재 회차
-    h2_current = soup.new_tag('h2')
-    h2_current.string = cycle_label(active_cycle)
-    soup.append(h2_current)
+    # Pre-BRD 섹션
+    if pre_brd:
+        h2_pre = soup.new_tag('h2')
+        h2_pre.string = SECTION_PRE
+        soup.append(h2_pre)
+        soup.append(_build_pre_brd_table(soup, pre_brd, ref_rows=ref_rows))
 
-    soup.append(_build_post_brd_table(soup, current_tickets, offset=0, ref_rows=ref_rows))
+    # Post-BRD 섹션 (회차별 h3 구분)
+    h2_post = soup.new_tag('h2')
+    h2_post.string = SECTION_POST
+    soup.append(h2_post)
+
+    post_offset = 0
+    for cn in all_post_cycles:
+        cycle_tickets = sorted(
+            [t for t in post_brd if t.get('cycle_number', 0) == cn],
+            key=lambda t: t.get('created', '')
+        )
+        h3 = soup.new_tag('h3')
+        h3.string = cycle_label(cn)
+        soup.append(h3)
+        soup.append(_build_post_brd_table(soup, cycle_tickets, offset=post_offset, ref_rows=ref_rows))
+        post_offset += len(cycle_tickets)
 
     # h1: Pending 관리 — 2026-01-01 이후 티켓만 (end_date 기준 필터 적용)
     if jira_client is not None:
@@ -975,15 +1025,15 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     p_disclaimer.append(em)
     soup.append(p_disclaimer)
 
+    # 이번 주 페이지 제목 (월요일 기준) + 탐색 후 업데이트/생성
+    page_title = _get_weekly_page_title()
     timestamp = as_of if as_of else now.strftime("%m-%d %H:%M")
-    master_id, current_html, current_version = _find_master_page(client, DOC_PAGE_IDS["doc1"])
-    if master_id:
-        if current_html and current_html.strip():
-            _create_snapshot(client, master_id, current_html, timestamp)
-        client.update_page(master_id, MASTER_TITLE, str(soup), current_version,
-                           message=f"{timestamp} 업데이트: {len(current_tickets)}건")
-        print(f"[Doc1] 마스터 페이지 업데이트 완료 ({active_cycle}회차: {len(current_tickets)}건, id={master_id})")
+    page_id, page_version = _find_weekly_page(client, DOC_PAGE_IDS["doc1"], page_title)
+    if page_id:
+        client.update_page(page_id, page_title, str(soup), page_version,
+                           message=f"{timestamp} 업데이트: {len(kr_tickets)}건")
+        print(f"[Doc1] 주간 페이지 업데이트 ({page_title}: {len(kr_tickets)}건, id={page_id})")
     else:
-        result = client.create_page(DOC_PAGE_IDS["doc1"], MASTER_TITLE, str(soup))
+        result = client.create_page(DOC_PAGE_IDS["doc1"], page_title, str(soup))
         new_id = result.get("id", "")
-        print(f"[Doc1] 마스터 페이지 최초 생성 ({active_cycle}회차: {len(current_tickets)}건, id={new_id})")
+        print(f"[Doc1] 주간 페이지 생성 ({page_title}: {len(kr_tickets)}건, id={new_id})")

@@ -33,7 +33,7 @@ schtasks /delete /TN "CCI_Doc2_Doc3_Daily" /F 2>nul
 schtasks /delete /TN "CCI_AutoUpdate"      /F 2>nul
 
 :: CCI 실행 작업 등록 (마스터 페이지 + 스냅샷 구조)
-schtasks /create /TN "CCI_Doc1"           /TR "%DIR%\run_doc1.bat"     /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 11:00 /F
+schtasks /create /TN "CCI_Doc1"           /TR "%DIR%\run_doc1.bat"     /SC WEEKLY /D MON /ST 10:00 /F
 schtasks /create /TN "CCI_Doc2"           /TR "%DIR%\run_doc2.bat"     /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 16:00 /F
 schtasks /create /TN "CCI_Snapshot_Daily" /TR "%DIR%\run_snapshot.bat" /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 18:00 /F
 schtasks /create /TN "CCI_Notify"         /TR "%DIR%\run_notify.bat"   /SC WEEKLY /D MON,TUE,WED,THU,FRI /ST 16:00 /F
