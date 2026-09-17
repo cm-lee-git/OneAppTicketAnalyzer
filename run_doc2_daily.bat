@@ -1,4 +1,4 @@
-@echo off
+﻿@echo off
 cd /d "%~dp0"
 
 if not exist "logs" mkdir logs
