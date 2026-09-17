@@ -209,28 +209,28 @@ class HmgConfluenceClient:
         return data["body"]["storage"]["value"], data["version"]["number"], data["title"]
 
     def get_child_pages(self, folder_id: str) -> list[dict]:
-        """폴더 내 자식 페이지 전체 조회 (페이지네이션 포함, 최신 수정순 Python 정렬)."""
+        """폴더 내 자식 페이지 전체 조회 (v1 REST API, 최신 수정순 Python 정렬).
+        v2 ?parentId= 필터가 hmg.atlassian.net에서 오작동하므로 v1 API 사용.
+        """
         results: list[dict] = []
-        params: dict = {"parentId": folder_id, "limit": 50}
+        base_v1 = "https://hmg.atlassian.net/wiki/rest/api"
+        start = 0
+        limit = 50
         while True:
             r = requests.get(
-                f"{self.base}/pages",
-                auth=self.auth, headers=self.headers, params=params, timeout=30,
+                f"{base_v1}/content/{folder_id}/child/page",
+                auth=self.auth,
+                headers={"Accept": "application/json"},
+                params={"limit": limit, "start": start, "expand": "version"},
+                timeout=30,
             )
             r.raise_for_status()
             data = r.json()
-            results.extend(data.get("results", []))
-            nxt = data.get("_links", {}).get("next", "")
-            if not nxt:
+            page_results = data.get("results", [])
+            results.extend(page_results)
+            if len(page_results) < limit:
                 break
-            cursor = None
-            for part in nxt.split("&"):
-                if "cursor=" in part:
-                    cursor = part.split("cursor=")[-1]
-                    break
-            if not cursor:
-                break
-            params = {"parentId": folder_id, "limit": 50, "cursor": cursor}
-        # version.createdAt 기준 최신순 정렬 (API sort 파라미터 미지원 대응)
-        results.sort(key=lambda p: p.get("version", {}).get("createdAt", ""), reverse=True)
+            start += limit
+        # version.when 기준 최신순 정렬
+        results.sort(key=lambda p: p.get("version", {}).get("when", ""), reverse=True)
         return results

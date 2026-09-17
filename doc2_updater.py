@@ -324,7 +324,7 @@ def _load_ref_history_doc2(hmg_client: HmgConfluenceClient, current_cycle: int) 
     REGION_MAP = [
         ('KR 티켓 히스토리', 'KR'),
         ('EU 티켓 히스토리', 'EU'),
-        ('HQ GBCXD 및 타부문 티켓 히스토리', 'HQ'),
+        ('HQ 티켓 히스토리', 'HQ'),
     ]
     APPROVAL_MAP = [
         ('승인 티켓', 'Approved'),

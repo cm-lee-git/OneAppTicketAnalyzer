@@ -177,8 +177,11 @@ class JiraClient:
 
         summary = f.get("summary", "")
         project = issue["key"].split("-")[0]
-        description = self._extract_text(f.get("description"))
-        print(f"  [normalize] {issue['key']}: description {len(description)}자")
+        raw_desc = f.get("description")
+        description = self._extract_text(raw_desc)
+        self_scores = self._extract_self_scores(raw_desc)
+        print(f"  [normalize] {issue['key']}: description {len(description)}자"
+              f", self_scores={bool(self_scores)}")
         # 그룹 티켓: subtasks 필드에 하위 작업이 있는 경우
         subtasks_raw = f.get("subtasks") or []
         subtask_keys = [s["key"] for s in subtasks_raw if s.get("key")]
@@ -203,6 +206,7 @@ class JiraClient:
             "is_fast_track":  feature_type == "Urgent Request",
             "is_group":       bool(subtask_keys),
             "subtask_keys":   subtask_keys,
+            "self_scores":    self_scores,  # BRD 7.1 셀프 스코어링 파싱 결과
         }
 
     @staticmethod
@@ -236,3 +240,113 @@ class JiraClient:
                     walk(child)
         walk(doc)
         return " ".join(texts).strip()
+
+    @staticmethod
+    def _extract_self_scores(doc) -> dict:
+        """ADF에서 BRD 7.1 셀프 스코어링 표 파싱 → {score_key: 'O'|'X', self_total: str}.
+
+        테이블 구조: 항목(rowspan 가능) | 선별 지표 | 해당 여부(O/X) | 근거 | 소계(rowspan 가능)
+        - 5셀 행: 카테고리 첫 행 → O/X 위치 = cells[2]
+        - 3~4셀 행: rowspan 연속 행 → O/X 위치 = cells[1]
+        시급성(3개) / 글로벌 파급(2개): OR 집계로 대표값 결정
+        섹션 미발견 또는 파싱 실패 시 빈 dict 반환.
+        """
+        if not doc or not isinstance(doc, dict):
+            return {}
+
+        _CAT_MAP = [
+            ("시급성",    "urgency"),
+            ("사업 성과", "business_performance"),
+            ("고객 경험", "customer_experience"),
+            ("운영 효율", "operational_efficiency"),
+            ("글로벌 파급", "global_reach"),
+            ("플랫폼",    "platform_strategy"),
+            ("전략 연계", "platform_strategy"),
+        ]
+        _PRIORITY_KEYS = [
+            "business_performance", "customer_experience",
+            "operational_efficiency", "global_reach", "platform_strategy",
+        ]
+
+        def cell_text(node) -> str:
+            texts: list[str] = []
+            def walk(n):
+                if isinstance(n, dict):
+                    if n.get("type") == "text":
+                        texts.append(n.get("text", ""))
+                    for ch in n.get("content", []):
+                        walk(ch)
+            walk(node)
+            return " ".join(texts).strip()
+
+        def _ox(raw: str) -> str:
+            """'O'/'X'/'o'/'x' 포함 텍스트 → 'O' 또는 'X'."""
+            s = raw.strip()
+            return "O" if s and s[0].upper() == "O" else "X"
+
+        def parse_table(table_node) -> dict:
+            cat_marks: dict[str, list[str]] = {}
+            current_cat: str | None = None
+
+            for row in table_node.get("content", []):
+                if row.get("type") != "tableRow":
+                    continue
+                cells = row.get("content", [])
+                n = len(cells)
+                if n < 2:
+                    continue
+
+                c0 = cell_text(cells[0])
+                # 카테고리 매칭: 5셀 행 + c0가 카테고리 키워드 포함
+                matched_cat = None
+                for kw, sk in _CAT_MAP:
+                    if kw in c0:
+                        matched_cat = sk
+                        break
+
+                if matched_cat and n >= 3:
+                    # 카테고리 첫 행: O/X = cells[2]
+                    current_cat = matched_cat
+                    mark = _ox(cell_text(cells[2]))
+                    cat_marks.setdefault(current_cat, []).append(mark)
+                elif current_cat and n <= 4 and not matched_cat:
+                    # rowspan 연속 행: O/X = cells[1]
+                    if n >= 2:
+                        mark = _ox(cell_text(cells[1]))
+                        cat_marks.setdefault(current_cat, []).append(mark)
+
+            scores: dict = {}
+            for sk, marks in cat_marks.items():
+                scores[sk] = "O" if "O" in marks else "X"
+            if scores:
+                scores["self_total"] = str(
+                    sum(1 for k in _PRIORITY_KEYS if scores.get(k) == "O")
+                )
+            return scores
+
+        def cell_text_outer(node) -> str:
+            return cell_text(node)
+
+        content = doc.get("content", [])
+        in_section = False
+        for node in content:
+            if not isinstance(node, dict):
+                continue
+            ntype = node.get("type", "")
+            if ntype == "heading":
+                text = cell_text_outer(node)
+                if "7.1" in text or "셀프 스코어" in text or "Self Scor" in text:
+                    in_section = True
+                elif in_section:
+                    break
+                continue
+            if not in_section:
+                continue
+            if ntype == "table":
+                return parse_table(node)
+            for sub in node.get("content", []):
+                if isinstance(sub, dict) and sub.get("type") == "table":
+                    result = parse_table(sub)
+                    if result:
+                        return result
+        return {}
