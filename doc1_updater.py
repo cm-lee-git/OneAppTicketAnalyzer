@@ -985,7 +985,8 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
 
     # Pre-BRD / Post-BRD 분리
     pre_brd, post_brd = _split_tickets(kr_tickets)
-    all_post_cycles = sorted({t.get('cycle_number', 0) for t in post_brd if t.get('cycle_number', 0) > 0})
+    # 1회차부터 현재 활성 회차까지 모두 표시 (티켓 없는 회차도 헤더 유지)
+    all_post_cycles = list(range(1, active_cycle + 1))
     current_tickets = [t for t in post_brd if t.get('cycle_number', 0) == active_cycle]
 
     # Feature 1: HMG Confluence에서 이전 티켓 행 추출
@@ -1036,8 +1037,15 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
         h3 = soup.new_tag('h3')
         h3.string = cycle_label(cn)
         soup.append(h3)
-        soup.append(_build_post_brd_table(soup, cycle_tickets, offset=post_offset, ref_rows=ref_rows))
-        post_offset += len(cycle_tickets)
+        if cycle_tickets:
+            soup.append(_build_post_brd_table(soup, cycle_tickets, offset=post_offset, ref_rows=ref_rows))
+            post_offset += len(cycle_tickets)
+        else:
+            p_empty = soup.new_tag('p')
+            em_empty = soup.new_tag('em')
+            em_empty.string = '해당 회차 KR 티켓 없음'
+            p_empty.append(em_empty)
+            soup.append(p_empty)
 
     # h1: Pending 관리 — 2026-01-01 이후 티켓만 (end_date 기준 필터 적용)
     if jira_client is not None:
@@ -1090,7 +1098,7 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     if prev_tickets and page_id:
         changes = _detect_ticket_changes(kr_tickets, prev_tickets)
         today = date.today()
-        sub_title = f"{today.month}/{today.day} 업데이트"
+        sub_title = now.strftime('%m-%d %H:%M') + " 업데이트"
         sub_html = _build_changes_subpage_html(changes, now.strftime('%Y-%m-%d %H:%M'))
         sub_id, sub_ver = _find_weekly_page(client, page_id, sub_title)
         if sub_id:

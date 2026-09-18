@@ -38,8 +38,12 @@ schtasks /create /TN "CCI_Doc2"           /TR "%DIR%\run_doc2.bat"     /SC WEEKL
 schtasks /create /TN "CCI_Snapshot_Daily" /TR "%DIR%\run_snapshot.bat" /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 18:00 /F
 schtasks /create /TN "CCI_Notify"         /TR "%DIR%\run_notify.bat"   /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 16:00 /F
 
-:: 자동 업데이트 작업 등록 (매일 08:30 ? 다른 작업보다 먼저 실행)
-schtasks /create /TN "CCI_AutoUpdate"     /TR "%DIR%\update.bat"       /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 08:30 /F
+:: 자동 업데이트 작업 등록 (매일 09:00 — 다른 작업보다 먼저 실행)
+schtasks /create /TN "CCI_AutoUpdate"     /TR "%DIR%\update.bat"       /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 09:00 /F
+
+:: 절전 해제 후 실행 옵션 — schtasks는 미지원이므로 PowerShell로 사후 적용
+powershell -NoProfile -Command ^
+  "Get-ScheduledTask -TaskName 'CCI_*' | ForEach-Object { $s = $_.Settings; $s.WakeToRun = $true; Set-ScheduledTask -TaskName $_.TaskName -Settings $s } | Out-Null"
 
 if "%SILENT%"=="0" (
     echo.

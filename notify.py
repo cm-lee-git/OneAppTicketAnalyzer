@@ -289,7 +289,8 @@ def _build_html(events: list[dict], since_iso: str = "", now_iso: str = "") -> s
     </body></html>"""
 
 
-CC_ALWAYS = "rayoun@innocean.com"   # 항상 참조 추가
+_OWNER_EMAIL = os.getenv("ANALYST_OWNER_EMAIL", "cmlee@innocean.com")
+CC_ALWAYS = f"rayoun@innocean.com; {_OWNER_EMAIL}"  # 항상 참조 추가 (_OWNER_EMAIL은 .env로 설정)
 
 # send_email → _send_one으로 since/now 전달용 모듈 변수
 _send_email_since: str = ""

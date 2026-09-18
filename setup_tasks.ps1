@@ -17,6 +17,7 @@ $Doc2Bat      = Join-Path $ScriptDir "run_doc2.bat"
 $Doc2DailyBat = Join-Path $ScriptDir "run_doc2_daily.bat"
 $SnapshotBat  = Join-Path $ScriptDir "run_snapshot.bat"
 $NotifyBat    = Join-Path $ScriptDir "run_notify.bat"
+$UpdateBat    = Join-Path $ScriptDir "update.bat"
 
 if (-not (Test-Path $Doc1Bat))      { Write-Error "run_doc1.bat 없음: $Doc1Bat"; exit 1 }
 if (-not (Test-Path $Doc1DailyBat)) { Write-Error "run_doc1_daily.bat 없음: $Doc1DailyBat"; exit 1 }
@@ -190,6 +191,29 @@ Register-ScheduledTask `
     -Settings $Settings `
     -Principal $Principal | Out-Null
 Write-Host "[OK] CCI_Notify 등록 완료 (5분마다 실행)"
+
+# ── Task: 자동 업데이트 (평일 09:00, 다른 작업보다 먼저) ────────────────
+$TriggerUpdate = New-ScheduledTaskTrigger `
+    -Weekly `
+    -DaysOfWeek Monday,Tuesday,Wednesday,Thursday,Friday `
+    -At "09:00"
+
+$ActionUpdate = New-ScheduledTaskAction `
+    -Execute "cmd.exe" `
+    -Argument "/c `"$UpdateBat`"" `
+    -WorkingDirectory $ScriptDir
+
+if (Get-ScheduledTask -TaskName "CCI_AutoUpdate" -ErrorAction SilentlyContinue) {
+    Unregister-ScheduledTask -TaskName "CCI_AutoUpdate" -Confirm:$false
+}
+Register-ScheduledTask `
+    -TaskName "CCI_AutoUpdate" `
+    -Description "GitHub 최신 코드 자동 업데이트 (평일 09:00, 다른 작업 전 실행)" `
+    -Trigger $TriggerUpdate `
+    -Action $ActionUpdate `
+    -Settings $Settings `
+    -Principal $Principal | Out-Null
+Write-Host "[OK] CCI_AutoUpdate 등록 완료 (평일 09:00)"
 
 Write-Host ""
 Write-Host "설치 완료. 등록된 작업:"

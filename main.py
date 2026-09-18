@@ -49,36 +49,37 @@ def _check_env():
 _KST = timezone(timedelta(hours=9))
 
 
-def _notify_teams_error(cmd: str, exc: BaseException) -> None:
-    """분석 실패 시 Teams Incoming Webhook으로 알림 전송."""
-    import requests as _req
-    url = os.getenv("TEAMS_WEBHOOK_URL", "").strip()
-    if not url:
-        return
-    now = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
+def _notify_outlook_error(cmd: str, exc: BaseException) -> None:
+    """분석 실패 시 Outlook COM으로 오류 알림 이메일 전송."""
+    from notify import SMTP_USER, PROJECT_RECIPIENTS, CC_ALWAYS
+    import win32com.client
+    now_str = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
     tb = traceback.format_exc()
-    # 스택 트레이스는 마지막 3줄만 포함 (길이 제한)
-    short_tb = "\n".join(tb.strip().splitlines()[-3:])
-    payload = {
-        "@type": "MessageCard",
-        "@context": "http://schema.org/extensions",
-        "themeColor": "FF0000",
-        "summary": f"[CCI Analyst] {cmd} 실패",
-        "sections": [{
-            "activityTitle": f"🚨 CCI Analyst 오류: `{cmd}`",
-            "activitySubtitle": now,
-            "facts": [
-                {"name": "오류 유형", "value": type(exc).__name__},
-                {"name": "메시지",   "value": str(exc)[:300]},
-                {"name": "위치",     "value": f"```{short_tb}```"},
-            ],
-            "markdown": True,
-        }],
-    }
+    short_tb = "\n".join(tb.strip().splitlines()[-5:])
+    subject = f"[CCI Analyst 오류] {cmd} 실패 — {now_str}"
+    body = f"""<p><b>[CCI Analyst] 자동화 스크립트 오류 발생</b></p>
+<table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:Arial;font-size:13px;">
+  <tr><td><b>실행 명령</b></td><td>{cmd}</td></tr>
+  <tr><td><b>발생 시각</b></td><td>{now_str}</td></tr>
+  <tr><td><b>오류 유형</b></td><td>{type(exc).__name__}</td></tr>
+  <tr><td><b>오류 메시지</b></td><td>{str(exc)[:400]}</td></tr>
+  <tr><td><b>스택 트레이스</b></td><td><pre style="font-size:11px;">{short_tb}</pre></td></tr>
+</table>
+<p style="color:gray;font-size:11px;">본 메일은 CCI Analyst 자동화 시스템에서 발송되었습니다.</p>"""
+    # 오류 알림은 운영자 본인에게만 발송 (.env ANALYST_OWNER_EMAIL로 설정)
+    all_to = [os.getenv("ANALYST_OWNER_EMAIL", "cmlee@innocean.com")]
     try:
-        _req.post(url, json=payload, timeout=10)
+        outlook = win32com.client.Dispatch("Outlook.Application")
+        mail = outlook.CreateItem(0)
+        mail.To = "; ".join(all_to)
+        mail.CC = CC_ALWAYS
+        mail.Subject = subject
+        mail.HTMLBody = body
+        mail.SentOnBehalfOfName = SMTP_USER
+        mail.Send()
+        print(f"[오류 알림] Outlook 발송 완료 → {all_to}")
     except Exception as e:
-        print(f"[Teams 알림] 전송 실패: {e}")
+        print(f"[오류 알림] Outlook 발송 실패: {e}")
 
 
 _TEST_SUMMARY_RE = re.compile(r'^\s*(brd\s*)?test\s*$', re.IGNORECASE)
@@ -319,5 +320,5 @@ if __name__ == "__main__":
     except Exception as exc:
         print(f"[오류] {_cmd_label} 실행 중 예외 발생: {exc}", file=sys.stderr)
         traceback.print_exc()
-        _notify_teams_error(_cmd_label, exc)
+        _notify_outlook_error(_cmd_label, exc)
         sys.exit(1)
