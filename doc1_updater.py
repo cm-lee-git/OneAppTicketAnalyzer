@@ -524,52 +524,51 @@ def _build_post_brd_normal_block(soup: BeautifulSoup, ticket: dict,
 
 def _build_fast_track_block(soup: BeautifulSoup, ticket: dict,
                              seq_num: int) -> list[Tag]:
-    """Fast Track (Urgent Request) 2행 블록 — 참조 문서 기준.
+    """Fast Track (Urgent Request) 1행 블록 — 참조 문서 기준.
     항목 분포 없이 BRD 승인 여부만 표기.
+    ※ rowspan=2 + 빈 tr2 구조는 Confluence가 빈 <tr>을 제거하면서 표가 깨지는 원인이므로
+       rowspan=1 단일 행으로 고정.
     """
     brd_text = _effective_brd(ticket, include_brd=True)
 
     # 내용 셀: ※ 형식 (참조 문서 기준) — <Status> 태그 사용 안 함
     content_td = soup.new_tag('td')
-    content_td['rowspan'] = '2'
     _fill_pre_brd_content_cell(content_td, ticket, soup)
 
     tr1 = soup.new_tag('tr')
-    tr1.append(_td(soup, seq_num, rowspan=2, center=True))
-    tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), rowspan=2, center=True))
-    tr1.append(_td_link(soup, ticket.get('key', ''), rowspan=2, center=True))
-    tr1.append(_td(soup, ticket.get('summary', ''), rowspan=2))
-    tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), rowspan=2, center=True))
-    tr1.append(_td(soup, ticket.get('created', ''), rowspan=2))
-    tr1.append(_td(soup, ticket.get('due_date', '') or '-', rowspan=2))
+    tr1.append(_td(soup, seq_num, center=True))
+    tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), center=True))
+    tr1.append(_td_link(soup, ticket.get('key', ''), center=True))
+    tr1.append(_td(soup, ticket.get('summary', '')))
+    tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), center=True))
+    tr1.append(_td(soup, ticket.get('created', '')))
+    tr1.append(_td(soup, ticket.get('due_date', '') or '-'))
     tr1.append(content_td)
     # 항목 분포 3열 span (빈 셀)
     empty_dist = soup.new_tag('td')
     empty_dist['colspan'] = '3'
-    empty_dist['rowspan'] = '2'
     p_empty = soup.new_tag('p')
     p_empty.string = ''
     empty_dist.append(p_empty)
     tr1.append(empty_dist)
     # Priority 점수 (빈)
-    tr1.append(_td(soup, '', rowspan=2, center=True))
+    tr1.append(_td(soup, '', center=True))
     # BRD 승인 여부
-    tr1.append(_td(soup, brd_text, rowspan=2, center=True))
+    tr1.append(_td(soup, brd_text, center=True))
 
-    tr2 = soup.new_tag('tr')
-
-    return [tr1, tr2]
+    return [tr1]
 
 
 def _build_group_ticket_block(soup: BeautifulSoup, ticket: dict,
                                seq_num: int) -> list[Tag]:
-    """그룹 티켓 2행 블록 — 참조 문서 기준.
+    """그룹 티켓 1행 블록 — 참조 문서 기준.
     BRD 심사 불필요. 항목 분포 없음.
+    ※ rowspan=2 + 빈 tr2 구조는 Confluence가 빈 <tr>을 제거하면서 표가 깨지는 원인이므로
+       rowspan=1 단일 행으로 고정.
     """
     subtask_keys = ticket.get('subtask_keys', [])
 
     content_td = soup.new_tag('td')
-    content_td['rowspan'] = '2'
 
     # ※ 그룹 티켓 비고
     p_note = soup.new_tag('p')
@@ -597,30 +596,27 @@ def _build_group_ticket_block(soup: BeautifulSoup, ticket: dict,
         content_td.append(ul)
 
     tr1 = soup.new_tag('tr')
-    tr1.append(_td(soup, seq_num, rowspan=2, center=True))
-    tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), rowspan=2, center=True))
-    tr1.append(_td_link(soup, ticket.get('key', ''), rowspan=2, center=True))
-    tr1.append(_td(soup, ticket.get('summary', ''), rowspan=2))
-    tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), rowspan=2, center=True))
-    tr1.append(_td(soup, ticket.get('created', ''), rowspan=2))
-    tr1.append(_td(soup, ticket.get('due_date', '') or '-', rowspan=2))
+    tr1.append(_td(soup, seq_num, center=True))
+    tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), center=True))
+    tr1.append(_td_link(soup, ticket.get('key', ''), center=True))
+    tr1.append(_td(soup, ticket.get('summary', '')))
+    tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), center=True))
+    tr1.append(_td(soup, ticket.get('created', '')))
+    tr1.append(_td(soup, ticket.get('due_date', '') or '-'))
     tr1.append(content_td)
     # 항목 분포 3열 span (빈 셀)
     empty_dist = soup.new_tag('td')
     empty_dist['colspan'] = '3'
-    empty_dist['rowspan'] = '2'
     p_empty = soup.new_tag('p')
     p_empty.string = ''
     empty_dist.append(p_empty)
     tr1.append(empty_dist)
     # Priority 점수 (빈)
-    tr1.append(_td(soup, '', rowspan=2, center=True))
+    tr1.append(_td(soup, '', center=True))
     # BRD 승인 여부: "-"
-    tr1.append(_td(soup, '-', rowspan=2, center=True))
+    tr1.append(_td(soup, '-', center=True))
 
-    tr2 = soup.new_tag('tr')
-
-    return [tr1, tr2]
+    return [tr1]
 
 
 def _build_post_brd_block(soup: BeautifulSoup, ticket: dict,
@@ -969,6 +965,31 @@ def _build_changes_subpage_html(changes: dict, timestamp: str) -> str:
     return '\n'.join(parts)
 
 
+# ─── 표 구조 검증 ────────────────────────────────────────────────────────────
+
+def _has_broken_rowspan(html: str) -> bool:
+    """저장된 페이지 HTML에서 rowspan=2 행이 연속으로 붙어 있는지 검사.
+    Confluence가 빈 <tr>을 제거해 발생하는 표 깨짐 패턴 감지.
+    True = 깨진 표 감지됨.
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    for table in soup.find_all('table'):
+        prev_rowspan2 = False
+        for tr in table.find_all('tr'):
+            tds = tr.find_all(['td', 'th'])
+            if not tds:
+                prev_rowspan2 = False
+                continue
+            first_rs = int(tds[0].get('rowspan', '1'))
+            if first_rs == 2:
+                if prev_rowspan2:
+                    return True  # rowspan=2 행 두 개가 바로 연속 → 깨진 표
+                prev_rowspan2 = True
+            else:
+                prev_rowspan2 = False
+    return False
+
+
 # ─── 전체 재빌드 ─────────────────────────────────────────────────────────────
 
 def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = None,
@@ -1093,6 +1114,25 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
         result = client.create_page(DOC_PAGE_IDS["doc1"], page_title, str(soup))
         page_id = result.get("id", "")
         print(f"[Doc1] 주간 페이지 생성 ({page_title}: {len(kr_tickets)}건, id={page_id})")
+
+    # 저장 후 표 구조 검증 → 깨진 표 감지 시 1회 재업데이트
+    if page_id:
+        try:
+            saved_html, saved_ver, _ = client.get_page_storage(page_id)
+            if _has_broken_rowspan(saved_html):
+                print(f"[Doc1] ⚠ 저장된 페이지에 깨진 표(rowspan 충돌) 감지 → 재업데이트 시도")
+                retry_ver = saved_ver
+                client.update_page(page_id, page_title, str(soup), retry_ver,
+                                   message=f"{timestamp} 깨진표 자동수정")
+                saved_html2, _, _ = client.get_page_storage(page_id)
+                if _has_broken_rowspan(saved_html2):
+                    print(f"[Doc1] ⚠ 재업데이트 후에도 깨진 표 잔존 — 수동 확인 필요")
+                else:
+                    print(f"[Doc1] 깨진 표 자동수정 완료")
+            else:
+                print(f"[Doc1] 표 구조 검증 통과")
+        except Exception as e:
+            print(f"[Doc1] 표 구조 검증 실패 (무시): {e}")
 
     # 일별 변경사항 서브페이지 (이전 실행 데이터가 있을 때만)
     if prev_tickets and page_id:
