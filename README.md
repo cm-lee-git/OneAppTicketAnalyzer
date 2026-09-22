@@ -77,13 +77,14 @@ setup_tasks.bat
 
 | 작업 이름 | 실행 시점 | 역할 |
 |---|---|---|
-| CCI_AutoUpdate | 평일 09:00 | 코드 자동 업데이트 + 스케줄 재등록 |
-| CCI_Doc1 | 평일 10:00 | Doc1 업데이트 |
-| CCI_Doc2 | 평일 16:00 | Doc2 업데이트 |
-| CCI_Notify | 평일 16:00 | 이메일 알림 발송 |
-| CCI_Snapshot_Daily | 평일 18:00 | 회차 마감 히스토리 스냅샷 |
+| OneApp_AutoUpdate | 평일 09:00 | 코드 자동 업데이트 + 스케줄 재등록 |
+| OneApp_Doc1 | 월요일 10:00 | Doc1 전체 재생성 |
+| OneApp_Doc1_Daily | 화~금 10:00 | Doc1 일간 업데이트 |
+| OneApp_Doc2 | 평일 16:00 | Doc2 업데이트 |
+| OneApp_Notify | 평일 16:00 | 이메일 알림 발송 |
+| OneApp_Snapshot_Daily | 평일 18:00 | 회차 마감 히스토리 스냅샷 |
 
-> **9시 이후에 컴퓨터를 켜도 CCI_AutoUpdate가 즉시 실행됩니다.**
+> **9시 이후에 컴퓨터를 켜도 OneApp_AutoUpdate가 즉시 실행됩니다.**
 > `StartWhenAvailable` 설정이 적용되어 있어 예약 시각을 놓쳐도 로그인 직후 실행됩니다. 배터리 상태에서도 동작합니다.
 
 ---
@@ -123,7 +124,6 @@ OneAppTicketAnalyzer/
 ├── run_notify.bat               # 알림 실행
 ├── update.bat                   # 코드 업데이트 + 스케줄 재등록
 ├── setup_tasks.bat              # 작업 스케줄러 일괄 등록 (관리자 권한 불필요)
-├── setup_tasks.ps1              # PowerShell 버전 (관리자 권한 필요)
 ├── ticket_overrides.json        # 티켓별 수동 오버라이드
 ├── prompts/
 │   └── scoring_v2_system_prompt.md  # Claude 분석 프롬프트
