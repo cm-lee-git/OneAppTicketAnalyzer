@@ -1,10 +1,10 @@
-﻿@echo off
+@echo off
 setlocal
 
-:: OneApp Ticket Analyzer scheduled task registration
-:: Works without PowerShell, without admin rights
-:: Run by double-clicking or from cmd.exe
-:: --silent 인자 시: 출력 최소화 (update.bat에서 호출 시 사용)
+:: OneApp Ticket Analyzer - scheduled task registration
+:: No admin rights required (uses schtasks.exe)
+:: --silent : minimal output (called from update.bat)
+:: --no-self: skip OneApp_AutoUpdate re-registration
 
 set "DIR=%~dp0"
 if "%DIR:~-1%"=="\" set "DIR=%DIR:~0,-1%"
@@ -23,7 +23,7 @@ if "%SILENT%"=="0" (
     echo.
 )
 
-:: 기존 작업 삭제 (구버전 포함)
+:: Delete old tasks (legacy CCI_* and previous OneApp_*)
 schtasks /delete /TN "CCI_Doc1_Weekly"         /F 2>nul
 schtasks /delete /TN "CCI_Doc1_Daily"          /F 2>nul
 schtasks /delete /TN "CCI_Doc2_Weekly"         /F 2>nul
@@ -44,23 +44,32 @@ schtasks /delete /TN "OneApp_Snapshot_Daily"   /F 2>nul
 schtasks /delete /TN "OneApp_Notify"           /F 2>nul
 if "%SKIP_SELF%"=="0" schtasks /delete /TN "OneApp_AutoUpdate" /F 2>nul
 
-:: OneApp Ticket Analyzer 실행 작업 등록 (마스터 페이지 + 스냅샷 구조)
-schtasks /create /TN "OneApp_Doc1"           /TR "%DIR%\run_doc1.bat"     /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 10:00 /F
-schtasks /create /TN "OneApp_Doc2"           /TR "%DIR%\run_doc2.bat"     /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 16:00 /F
-schtasks /create /TN "OneApp_Snapshot_Daily" /TR "%DIR%\run_snapshot.bat" /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 18:00 /F
-schtasks /create /TN "OneApp_Notify"         /TR "%DIR%\run_notify.bat"   /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 16:00 /F
+:: Doc1 Monday - full weekly rebuild (main.py --doc1)
+schtasks /create /TN "OneApp_Doc1"           /TR "%DIR%\run_doc1.bat"       /SC WEEKLY /D MON                  /ST 10:00 /F
 
-:: 자동 업데이트 작업 등록 (매일 09:00 — 다른 작업보다 먼저 실행)
-if "%SKIP_SELF%"=="0" schtasks /create /TN "OneApp_AutoUpdate"  /TR "%DIR%\update.bat"       /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 09:00 /F
+:: Doc1 Tue-Fri - daily new ticket addition + sub-page (main.py --doc1-daily)
+schtasks /create /TN "OneApp_Doc1_Daily"     /TR "%DIR%\run_doc1_daily.bat" /SC WEEKLY /D "TUE,WED,THU,FRI"   /ST 10:00 /F
 
-:: 절전 해제 후 실행 + 예약 시각 놓쳤을 때 켜지면 즉시 실행 + 배터리 상태에서도 실행
-:: schtasks는 미지원이므로 PowerShell로 사후 적용
-powershell -NoProfile -Command ^
-  "Get-ScheduledTask -TaskName 'OneApp_*' | ForEach-Object { $s = $_.Settings; $s.WakeToRun = $true; $s.StartWhenAvailable = $true; $s.DisallowStartIfOnBatteries = $false; $s.StopIfGoingOnBatteries = $false; Set-ScheduledTask -TaskName $_.TaskName -Settings $s } | Out-Null"
+:: Doc2 weekdays - master doc update + daily sub-page (main.py --doc2-daily)
+schtasks /create /TN "OneApp_Doc2"           /TR "%DIR%\run_doc2_daily.bat" /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 16:00 /F
+
+:: Snapshot weekdays - saves only on cycle end dates
+schtasks /create /TN "OneApp_Snapshot_Daily" /TR "%DIR%\run_snapshot.bat"   /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 18:00 /F
+
+:: Notify weekdays
+schtasks /create /TN "OneApp_Notify"         /TR "%DIR%\run_notify.bat"     /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 16:00 /F
+
+:: Auto-update weekdays 09:00 (git pull + task re-registration)
+if "%SKIP_SELF%"=="0" schtasks /create /TN "OneApp_AutoUpdate" /TR "%DIR%\update.bat" /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 09:00 /F
+
+:: Apply advanced settings via PowerShell:
+:: WakeToRun + battery/battery-stop fix for all tasks
+:: StartWhenAvailable for all EXCEPT OneApp_Doc1 (Mon rebuild: avoid early-boot S4U auth failure)
+powershell -NoProfile -Command "Get-ScheduledTask -TaskName 'OneApp_*' | ForEach-Object { $s = $_.Settings; $s.WakeToRun = $true; $s.DisallowStartIfOnBatteries = $false; $s.StopIfGoingOnBatteries = $false; if ($_.TaskName -ne 'OneApp_Doc1') { $s.StartWhenAvailable = $true }; Set-ScheduledTask -TaskName $_.TaskName -Settings $s } | Out-Null"
 
 if "%SILENT%"=="0" (
     echo.
-    echo === 등록된 OneApp 작업 목록 ===
+    echo === Registered OneApp tasks ===
     schtasks /query /fo TABLE | findstr "OneApp_"
     echo.
     pause
