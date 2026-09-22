@@ -86,14 +86,14 @@ CW = {
                            291, 93, 90, 110, 93, 104],
     "kr_pending":         [208, 110, 110, 110, 110, 110,        # 12열: KR 보류
                            110, 110, 110, 180, 180, 110],
-    "kr_rejected":        [200, 132, 132, 135, 132, 132,        # 9열: KR 반려
-                           132, 132, 250],
+    "kr_rejected":        [200, 132, 132, 135, 132, 132,        # 10열: KR 반려 (+IMG)
+                           132, 132, 200, 80],
     "eu_approved":        [198, 122, 122, 122, 122, 122,        # 12열: EU 승인 (항목|셀프|AI)
                            122, 122, 90, 110, 122, 122],
     "eu_pending":         [198, 122, 122, 122, 122, 122,        # 11열: EU 보류
                            122, 122, 155, 155, 110],
-    "eu_rejected":        [198, 122, 122, 122, 122, 122,        # 8열: EU 반려
-                           122, 122, 250],
+    "eu_rejected":        [198, 122, 122, 122, 122, 122,        # 9열: EU 반려 (+IMG)
+                           122, 122, 200, 80],
     "history":            [122, 108, 87, 92, 71, 90, 85, 106,  # 13열: 마감 히스토리
                            83, 98, 81, 92, 92],
 }
@@ -416,13 +416,6 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
     cc = (f'<td rowspan="6"><p>{cycle_label(t.get("cycle_number", 0))}</p></td>'
           if has_cycle_col else '')
 
-    score_rows = ''.join(
-        f'<tr><td><p>{SCORE_LABELS[i]}</p></td>'
-        f'<td><p>—</p></td>'
-        f'<td><p>{_score_mark(scores.get(SCORE_KEYS[i], 0))}</p></td></tr>'
-        for i in range(1, 6)
-    )
-
     if table_type == 'approved':
         is_prebrd = (t.get('cycle_number', 0) == 0)
         feature_label = t.get('feature_label') or '기존 기능 개선'
@@ -435,8 +428,38 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
                 parts.append(f'<p><strong>&lt;{label}&gt;</strong></p><ul>'
                              + ''.join(f'<li>{l}</li>' for l in lines) + '</ul>')
         content_html = ''.join(parts)
-        priority = str(sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0))
+        selfs = t.get('self_scores') or {}
+
+        def _score_cell(i):
+            k = SCORE_KEYS[i]
+            a = _score_mark(scores.get(k, 0))
+            s = selfs.get(k) if selfs else None
+            if s is None:
+                return (f'<td><p>{SCORE_LABELS[i]}</p></td>'
+                        f'<td><p>—</p></td>'
+                        f'<td><p>{a}</p></td>')
+            bg = MATCH_BG if s == a else MISMATCH_BG
+            return (f'<td><p>{SCORE_LABELS[i]}</p></td>'
+                    f'<td data-highlight-colour="{bg}"><p>{s}</p></td>'
+                    f'<td data-highlight-colour="{bg}"><p>{a}</p></td>')
+
+        ai_total = sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0)
+        if selfs:
+            self_total = selfs.get('self_total', '')
+            matched = sum(1 for k in SCORE_KEYS
+                          if selfs.get(k) and selfs.get(k) == _score_mark(scores.get(k, 0)))
+            comparable = sum(1 for k in SCORE_KEYS if selfs.get(k))
+            priority_td = (f'<td rowspan="6">'
+                           f'<p>셀프 {self_total} / AI {ai_total}</p>'
+                           f'<p>(항목 일치 {matched}/{comparable})</p></td>')
+        else:
+            priority_td = td_rs(str(ai_total))
+
         brd_val = '' if is_prebrd else APPROVAL_LABEL.get(_effective_approval(t), '')
+        rebuilt_score_rows = ''.join(
+            f'<tr>{_score_cell(i)}</tr>'
+            for i in range(1, 6)
+        )
         row1 = (
             f'<tr>{td_rs("1")}{cc}'
             f'<td rowspan="6"><p>{_key_link(key)}</p></td>'
@@ -444,12 +467,10 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
             f'{_reporter_html(t.get("reporter", ""), t.get("initiator", ""))}'
             f'{td_rs(t.get("created", ""))}{td_rs(t.get("due_date", ""))}'
             f'<td rowspan="6">{content_html}</td>'
-            f'<td><p>{SCORE_LABELS[0]}</p></td>'
-            f'<td><p>—</p></td>'
-            f'<td><p>{_score_mark(scores.get(SCORE_KEYS[0], 0))}</p></td>'
-            f'{td_rs(priority)}{td_rs(brd_val)}</tr>'
+            f'{_score_cell(0)}'
+            f'{priority_td}{td_rs(brd_val)}</tr>'
         )
-        return row1 + score_rows
+        return row1 + rebuilt_score_rows
 
     elif table_type == 'pending':
         hold_code = t.get('hold_code') or ''
@@ -473,7 +494,8 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
             f'<td><p>{t.get("summary", "")}</p></td>'
             f'{_reporter_html(t.get("reporter", ""), t.get("initiator", ""), rs=1)}'
             f'<td><p>{t.get("created", "")}</p></td><td><p>{t.get("due_date", "")}</p></td>'
-            f'<td><p>{rej_code}</p></td><td><p>{reason}</p></td></tr>'
+            f'<td><p>{rej_code}</p></td><td><p>{reason}</p></td>'
+            f'<td></td></tr>'
         )
 
     return ''
@@ -492,8 +514,8 @@ def _apply_history_filter_and_update(body_html: str, tickets_by_key: dict,
 
     EXPECTED_COLS = {
         'approved': 13 if has_cycle_col else 12,
-        'pending':  14 if has_cycle_col else 13,
-        'rejected': 12 if has_cycle_col else 11,
+        'pending':  12 if has_cycle_col else 11,
+        'rejected': 10 if has_cycle_col else 9,
     }
     expected_cols = EXPECTED_COLS.get(table_type, 0)
     key_col_idx     = 2 if has_cycle_col else 1
@@ -615,7 +637,7 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
     if not tickets:
         return _no_tickets(prebrd=is_prebrd)
 
-    last_col = "CCI 안건 상정 여부" if is_prebrd else "BRD 승인 여부"
+    last_col = "CCI 상정 여부" if is_prebrd else "BRD 승인 여부"
     if has_cycle_col:
         # 항목 분포 3열(항목|셀프|AI), 2행 헤더
         header1 = _th_span([
@@ -798,13 +820,13 @@ def _build_rejected_table(tickets, widths, has_cycle_col, prebrd=False, ref_rows
         header = _th_span([
             ("#", 1, 1), ("회차", 1, 1), ("Key", 1, 1), ("Ticket Summary", 1, 1),
             ("Reporter", 1, 1), ("Created", 1, 1), ("Due date", 1, 1),
-            ("반려 code", 1, 1), ("반려 사유", 1, 1),
+            ("반려 code", 1, 1), ("반려 사유", 1, 1), ("IMG", 1, 1),
         ])
     else:
         header = _th_span([
             ("#", 1, 1), ("Key", 1, 1), ("Ticket Summary", 1, 1),
             ("Reporter", 1, 1), ("Created", 1, 1), ("Due date", 1, 1),
-            ("반려 code", 1, 1), ("반려 사유", 1, 1),
+            ("반려 code", 1, 1), ("반려 사유", 1, 1), ("IMG", 1, 1),
         ])
 
     def td(text):
@@ -838,6 +860,7 @@ def _build_rejected_table(tickets, widths, has_cycle_col, prebrd=False, ref_rows
             f'{td(t.get("due_date", ""))}'
             f'{td(rej_code)}'
             f'{td(reason)}'
+            f'<td></td>'
             f"</tr>"
         )
 

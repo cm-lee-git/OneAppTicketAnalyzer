@@ -67,7 +67,7 @@ def _notify_outlook_error(cmd: str, exc: BaseException) -> None:
 </table>
 <p style="color:gray;font-size:11px;">본 메일은 OneApp Ticket Analyzer 자동화 시스템에서 발송되었습니다.</p>"""
     # 오류 알림은 운영자 본인에게만 발송 (.env ANALYST_OWNER_EMAIL로 설정)
-    all_to = [os.getenv("ANALYST_OWNER_EMAIL", "cmlee@innocean.com")]
+    all_to = [os.getenv("ANALYST_OWNER_EMAIL") or os.getenv("JIRA_EMAIL", "cmlee@innocean.com")]
     try:
         outlook = win32com.client.Dispatch("Outlook.Application")
         mail = outlook.CreateItem(0)

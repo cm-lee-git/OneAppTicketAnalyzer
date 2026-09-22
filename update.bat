@@ -17,6 +17,14 @@ if errorlevel 1 (
     echo [%date% %time%] git pull 완료. >> "%LOGFILE%"
 )
 
+echo [%date% %time%] pip install 실행... >> "%LOGFILE%"
+pip install -r "%~dp0requirements.txt" --quiet >> "%LOGFILE%" 2>&1
+if errorlevel 1 (
+    echo [%date% %time%] [경고] pip install 실패. 로그 확인 필요. >> "%LOGFILE%"
+) else (
+    echo [%date% %time%] pip install 완료. >> "%LOGFILE%"
+)
+
 echo [%date% %time%] 작업 스케줄러 재등록... >> "%LOGFILE%"
 call "%~dp0setup_tasks.bat" --silent --no-self >> "%LOGFILE%" 2>&1
 
