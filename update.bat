@@ -18,7 +18,7 @@ if errorlevel 1 (
 )
 
 echo [%date% %time%] 작업 스케줄러 재등록... >> "%LOGFILE%"
-call "%~dp0setup_tasks.bat" --silent >> "%LOGFILE%" 2>&1
+call "%~dp0setup_tasks.bat" --silent --no-self >> "%LOGFILE%" 2>&1
 
 echo [%date% %time%] ===== 자동 업데이트 완료 ===== >> "%LOGFILE%"
 endlocal
