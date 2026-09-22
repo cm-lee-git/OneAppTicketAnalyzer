@@ -6,9 +6,9 @@
 >
 > 원본(v1) 대비 달라진 점
 > 1. 시급성을 3개 하위 지표(대규모 장애 / 법규 대응 / 리더십 결정)로 분리 → `fast_track` 산출
-> 2. 글로벌 파급 범위를 2개 하위 지표(MAU / 수혜 국가 비율)로 분리 → 0~2점
+> 2. 글로벌 파급 범위를 2개 하위 지표(MAU / 수혜 국가 비율)로 분리 → 둘 중 하나라도 O이면 1점
 > 3. 플랫폼 운영 전략 연계도에 적용 KPI 명시
-> 4. 합계 0~6 (= 7.2 양식 합계 범위), 시급성은 합계 제외
+> 4. 합계 0~5 (= 7.2 양식 합계 범위), 시급성은 합계 제외
 > 5. 모든 항목에 `basis`(근거 1~2문장) 필수 — 검토자가 왜 O/X인지 바로 볼 수 있게
 > 6. 입력에 7.1 셀프 스코어링의 O/X·점수가 남아 있어도 참고 금지 (근거 문장만 참고)
 >
@@ -76,9 +76,9 @@ Jira 티켓 정보를 받아 아래 JSON 형식으로만 응답하세요. 설명
 - `fast_track` = 시급성 하위 3개 중 하나라도 "O"면 1, 아니면 0. **합계(total)에 포함하지 않음.**
 - `business_performance.score`, `customer_experience.score`, `operational_efficiency.score`, `platform_strategy.score`
   = mark가 "O"면 1, "X"면 0.
-- `global_reach.score` = mau(O=1) + coverage(O=1) → 0~2.
+- `global_reach.score` = mau 또는 coverage 중 하나라도 "O"이면 1, 둘 다 "X"이면 0.
   **단일 국가 요청은 mau·coverage 모두 "X"** (권역 적용 범위 조건 미충족).
-- `total` = business_performance + customer_experience + operational_efficiency + global_reach + platform_strategy → **0~6.**
+- `total` = business_performance + customer_experience + operational_efficiency + global_reach + platform_strategy → **0~5.**
 
 ## 항목별 판단 기준
 
@@ -103,7 +103,7 @@ Jira 티켓 정보를 받아 아래 JSON 형식으로만 응답하세요. 설명
 ### 글로벌 파급 범위
 - mau: 권역/국가 활성 사용자 2M 이상 (KR 원앱 전체 대상은 충족, EU는 국가별 확인 필요)
 - coverage: 권역 내 수혜 국가 비율 50% 이상. **KR·독일 등 단일 국가 요청은 무조건 X**
-- 두 하위 지표를 각각 독립 판정 (v1의 "둘 다 충족해야 1" 규칙 폐기)
+- 둘 중 하나라도 O이면 global_reach = 1; 둘 다 X이면 0
 
 ### 플랫폼 운영 전략 연계도
 - KR: 원격제어 / 정비 / 충전 핵심 기능 사용율 또는 비즈니스 전환율에 직결되는 기능 → O
@@ -113,7 +113,7 @@ Jira 티켓 정보를 받아 아래 JSON 형식으로만 응답하세요. 설명
 
 ## 실제 사례 기반 보정
 
-- KCCIVOC-5593 (원격진단 선제 알람): bp O(품질비용 연 3억+ 절감), cx O(VoC), oe O(OTA로 입고 대체), gr mau O·coverage O(KR 전체), ps O(정비/제어 KPI) → total 6
+- KCCIVOC-5593 (원격진단 선제 알람): bp O(품질비용 연 3억+ 절감), cx O(VoC), oe O(OTA로 입고 대체), gr mau O·coverage O(KR 전체) → score 1, ps O(정비/제어 KPI) → total 5
 - KEUVOCOP-1881 (버튼명 변경 1줄): 전 항목 X → total 0 → 보류 상태면 R1
 - KEUVOCOP-2238 (Marketing Cloud SDK): oe O만 → total 1. Country "All"이어도 SDK 인프라 작업은 mau·coverage X
 - KEUVOCOP-1923 (독일 딜러 검색 오류): cx O, gr mau X·coverage X(단일 국가) → total 1
