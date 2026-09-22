@@ -688,7 +688,7 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
                 f'<td data-highlight-colour="{bg}"><p>{s}</p></td>'
                 f'<td data-highlight-colour="{bg}"><p>{a_text}</p></td>')
 
-    rows = [header1, header2]
+    rows = [header1]
     seq = 0
     for t in tickets:
         seq += 1
@@ -1263,6 +1263,24 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
 
 # ── 변경 감지 / 서브페이지 ──────────────────────────────────────
 
+def _detect_format_changes(prev_html: str) -> list[str]:
+    """이전 마스터 페이지 HTML과 현재 코드 기준으로 포맷 변경 여부 감지."""
+    notes = []
+    if not prev_html:
+        return notes
+    # 승인 테이블: 기존 항목 분포 colspan=2 → colspan=3 (셀프/AI 추가)
+    if 'colspan="2"' in prev_html and '셀프(요청자)' not in prev_html:
+        notes.append('승인 테이블 항목 분포 열 구조 변경: 항목+점수(2열) → 항목+셀프(요청자)+AI(7.2 초안)(3열)')
+    # 반려 테이블: IMG 열 추가
+    if '"반려 code"' in prev_html or '반려 code' in prev_html:
+        if '<th' in prev_html and 'IMG' not in prev_html:
+            notes.append('반려 테이블 IMG 열 추가')
+    # CCI 상정 여부 명칭 변경
+    if 'CCI 안건 상정 여부' in prev_html:
+        notes.append('Pre-BRD 열 명칭 변경: CCI 안건 상정 여부 → CCI 상정 여부')
+    return notes
+
+
 def _detect_doc2_changes(current: list[dict], prev: list[dict]) -> dict:
     """현재 전체 티켓 vs 이전 실행 티켓 비교. 신규/상태변경 분류 (전 권역)."""
     prev_map = {t.get('key'): t for t in prev if t.get('key')}
@@ -1292,12 +1310,18 @@ def _detect_doc2_changes(current: list[dict], prev: list[dict]) -> dict:
     return {'new': new_tickets, 'changed': changed_tickets}
 
 
-def _build_doc2_changes_subpage_html(changes: dict, timestamp: str) -> str:
+def _build_doc2_changes_subpage_html(changes: dict, timestamp: str,
+                                      format_notes: list[str] | None = None) -> str:
     """Doc2 일별 변경사항 서브페이지 HTML."""
     new_tickets = changes.get('new', [])
     changed_tickets = changes.get('changed', [])
     parts = [f'<p><em>{timestamp} 기준 변경사항</em></p>']
-    if not new_tickets and not changed_tickets:
+    if format_notes:
+        parts.append(f'<h2>포맷 변경 ({len(format_notes)}건)</h2><ul>')
+        for note in format_notes:
+            parts.append(f'<li>{note}</li>')
+        parts.append('</ul>')
+    if not new_tickets and not changed_tickets and not format_notes:
         parts.append('<p>변경사항 없음</p>')
         return '\n'.join(parts)
     if new_tickets:
@@ -1451,8 +1475,11 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     # 일별 변경사항 서브페이지 (이전 실행 데이터가 있을 때만)
     if prev_tickets and master_id:
         changes = _detect_doc2_changes(tickets_with_analysis, prev_tickets)
+        format_notes = _detect_format_changes(current_html or "")
         sub_title = f"{now.month}/{now.day} 업데이트"
-        sub_html = _build_doc2_changes_subpage_html(changes, now.strftime('%Y-%m-%d %H:%M'))
+        sub_html = _build_doc2_changes_subpage_html(
+            changes, now.strftime('%Y-%m-%d %H:%M'), format_notes=format_notes
+        )
         sub_id, sub_ver = _find_child_page_by_title(client, master_id, sub_title)
         if sub_id:
             client.update_page(sub_id, sub_title, sub_html, sub_ver,
@@ -1460,4 +1487,5 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
         else:
             client.create_page(master_id, sub_title, sub_html)
         print(f"[Doc2] 변경사항 서브페이지 {'업데이트' if sub_id else '생성'}: {sub_title} "
-              f"(신규 {len(changes['new'])}건, 변경 {len(changes['changed'])}건)")
+              f"(신규 {len(changes['new'])}건, 변경 {len(changes['changed'])}건"
+              + (f", 포맷 {len(format_notes)}건)" if format_notes else ")"))
