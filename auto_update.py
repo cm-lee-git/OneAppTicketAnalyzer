@@ -9,7 +9,7 @@ import io, os, shutil, subprocess, sys, zipfile
 import requests
 from datetime import datetime
 
-REPO   = "cm-lee-git/claude_ticket_analyst"
+REPO   = "cm-lee-git/OneAppTicketAnalyzer"
 BRANCH = "main"
 HERE   = os.path.dirname(os.path.abspath(__file__))
 

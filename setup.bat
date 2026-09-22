@@ -45,7 +45,7 @@ if not exist ".git" (
     echo.
     echo [Git 초기화] 최초 설정 중...
     git init
-    git remote add origin https://github.com/cm-lee-git/claude_ticket_analyst.git
+    git remote add origin https://github.com/cm-lee-git/OneAppTicketAnalyzer.git
     git fetch origin main
     git checkout -f main
     echo [OK] Git 저장소 초기화 완료
