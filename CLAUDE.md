@@ -95,7 +95,7 @@ python main.py --list-fields
 ## 4. 파일 구조
 
 ```
-cci-analyst/
+OneAppTicketAnalyzer/
 ├── main.py              # CLI 진입점 (--doc1 / --doc1-daily / --doc2 / --doc2-daily / --snapshot / --all)
 ├── config.py            # 환경변수, Jira/Confluence 설정, BRD 상태 매핑
 ├── jira_client.py       # Jira API 클라이언트 (티켓 조회, description 수신)

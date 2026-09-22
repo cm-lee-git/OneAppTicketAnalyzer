@@ -1,5 +1,5 @@
 """
-CCI Ticket Analyst — 메인 실행 파일
+OneApp Ticket Analyzer — 메인 실행 파일
 
 사용법:
   python main.py --doc1          # Doc1 업데이트 (KKR 주간 보고)
@@ -56,8 +56,8 @@ def _notify_outlook_error(cmd: str, exc: BaseException) -> None:
     now_str = datetime.now(_KST).strftime("%Y-%m-%d %H:%M KST")
     tb = traceback.format_exc()
     short_tb = "\n".join(tb.strip().splitlines()[-5:])
-    subject = f"[CCI Analyst 오류] {cmd} 실패 — {now_str}"
-    body = f"""<p><b>[CCI Analyst] 자동화 스크립트 오류 발생</b></p>
+    subject = f"[OneApp Ticket Analyzer 오류] {cmd} 실패 — {now_str}"
+    body = f"""<p><b>[OneApp Ticket Analyzer] 자동화 스크립트 오류 발생</b></p>
 <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:Arial;font-size:13px;">
   <tr><td><b>실행 명령</b></td><td>{cmd}</td></tr>
   <tr><td><b>발생 시각</b></td><td>{now_str}</td></tr>
@@ -65,7 +65,7 @@ def _notify_outlook_error(cmd: str, exc: BaseException) -> None:
   <tr><td><b>오류 메시지</b></td><td>{str(exc)[:400]}</td></tr>
   <tr><td><b>스택 트레이스</b></td><td><pre style="font-size:11px;">{short_tb}</pre></td></tr>
 </table>
-<p style="color:gray;font-size:11px;">본 메일은 CCI Analyst 자동화 시스템에서 발송되었습니다.</p>"""
+<p style="color:gray;font-size:11px;">본 메일은 OneApp Ticket Analyzer 자동화 시스템에서 발송되었습니다.</p>"""
     # 오류 알림은 운영자 본인에게만 발송 (.env ANALYST_OWNER_EMAIL로 설정)
     all_to = [os.getenv("ANALYST_OWNER_EMAIL", "cmlee@innocean.com")]
     try:
@@ -279,7 +279,7 @@ def _cmd_doc2_daily_compat(as_of, from_date, use_cache, test_mode):
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="CCI Ticket Analyst")
+    parser = argparse.ArgumentParser(description="OneApp Ticket Analyzer")
     group = parser.add_mutually_exclusive_group(required=True)
     group.add_argument("--doc1",         action="store_true", help="Doc1 업데이트 (마스터 페이지 + 스냅샷)")
     group.add_argument("--doc2",         action="store_true", help="Doc2 업데이트 (마스터 페이지 + 스냅샷)")

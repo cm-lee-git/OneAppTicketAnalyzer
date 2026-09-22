@@ -21,7 +21,7 @@ KCCIVOC · KEUVOCOP Jira 티켓을 자동으로 분석하고 Confluence 문서�
 ### Step 1. 패키지 설치
 
 ```bash
-cd cci-analyst
+cd OneAppTicketAnalyzer
 pip install -r requirements.txt
 ```
 
@@ -103,7 +103,7 @@ setup_tasks.bat
 ## 파일 구조
 
 ```
-cci-analyst/
+OneAppTicketAnalyzer/
 ├── main.py                      # CLI 진입점
 ├── config.py                    # 환경변수, Jira/Confluence 설정, BRD 상태 매핑
 ├── jira_client.py               # Jira API 클라이언트

@@ -4,7 +4,7 @@ cd /d "%~dp0"
 
 echo.
 echo ================================================
-echo  CCI Analyst 초기 설정
+echo  OneApp Ticket Analyzer 초기 설정
 echo ================================================
 echo.
 

@@ -284,7 +284,7 @@ def _build_html(events: list[dict], since_iso: str = "", now_iso: str = "") -> s
       {rows_html}
     </table>
     <p style="{_FF}color:#999;font-size:12px;margin-top:24px;">
-      자동 알림 — CCI Analyst Bot ({datetime.now().strftime('%Y-%m-%d %H:%M')})
+      자동 알림 — OneApp Ticket Analyzer Bot ({datetime.now().strftime('%Y-%m-%d %H:%M')})
     </p>
     </body></html>"""
 
