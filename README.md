@@ -1,4 +1,4 @@
-# CCI Ticket Analyst
+# OneApp Ticket Analyzer
 
 KCCIVOC · KEUVOCOP Jira 티켓을 자동으로 분석하고 Confluence 문서를 업데이트하는 자동화 도구입니다.
 사내 Claude 프록시(h-chat)를 사용하므로 **사내망에서만 동작**하며, Windows 작업 스케줄러로 자동 실행됩니다.

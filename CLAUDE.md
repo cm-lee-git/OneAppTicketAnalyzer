@@ -1,4 +1,4 @@
-# CCI Ticket Screener — 프로젝트 컨텍스트
+# OneApp Ticket Analyzer — 프로젝트 컨텍스트
 
 이 파일 하나로 신규 개발자가 프로젝트를 온보딩할 수 있도록 작성되었습니다.
 글로벌 `CLAUDE.md` 또는 사용자별 메모리 파일 없이도 모든 판단 기준이 여기에 포함됩니다.
@@ -73,10 +73,10 @@ python main.py --list-fields
 
 | 작업 이름 | 배치파일 | 실행 시점 |
 |---|---|---|
-| CCI_Doc1 | `run_doc1.bat` | 평일 매일 10:00 |
-| CCI_Doc2 | `run_doc2.bat` | 평일 매일 16:00 |
-| CCI_Notify | `run_notify.bat` | 평일 매일 16:00 |
-| CCI_Snapshot_Daily | `run_snapshot.bat` | 평일 매일 18:00 |
+| OneApp_Doc1 | `run_doc1.bat` | 평일 매일 10:00 |
+| OneApp_Doc2 | `run_doc2.bat` | 평일 매일 16:00 |
+| OneApp_Notify | `run_notify.bat` | 평일 매일 16:00 |
+| OneApp_Snapshot_Daily | `run_snapshot.bat` | 평일 매일 18:00 |
 
 **문서 업데이트 방식:**
 - Doc1: **월요일** 신규 주간 페이지 생성(`M/D KKR OneApp`), **화~금** 동일 주간 페이지 업데이트. 매일 실행 시 변경 내용을 `M/D 업데이트` 하위 서브페이지로 자동 생성.
