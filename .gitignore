@@ -5,6 +5,7 @@
 notify_state.json
 notify_state.json.bak
 tickets_analyzed_latest.json
+tickets_analysis_cache.json
 cycle_snapshots.json
 
 # 로그
