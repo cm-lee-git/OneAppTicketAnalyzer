@@ -410,10 +410,10 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
     key = t.get('key', '')
     scores = t.get('scores', {})
 
-    def td_rs(text, rs=6):
+    def td_rs(text, rs=7):
         return f'<td rowspan="{rs}"><p>{text}</p></td>'
 
-    cc = (f'<td rowspan="6"><p>{cycle_label(t.get("cycle_number", 0))}</p></td>'
+    cc = (f'<td rowspan="7"><p>{cycle_label(t.get("cycle_number", 0))}</p></td>'
           if has_cycle_col else '')
 
     if table_type == 'approved':
@@ -444,16 +444,21 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
                     f'<td data-highlight-colour="{bg}"><p>{a}</p></td>')
 
         ai_total = sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0)
+        cii_submitted = "O" if (float(scores.get("urgency", 0)) > 0 or ai_total > 0) else "X"
         if selfs:
             self_total = selfs.get('self_total', '')
             matched = sum(1 for k in SCORE_KEYS
                           if selfs.get(k) and selfs.get(k) == _score_mark(scores.get(k, 0)))
             comparable = sum(1 for k in SCORE_KEYS if selfs.get(k))
-            priority_td = (f'<td rowspan="6">'
-                           f'<p>셀프 {self_total} / AI {ai_total}</p>'
-                           f'<p>(항목 일치 {matched}/{comparable})</p></td>')
+            compare_html = f'셀프 {self_total} / AI {ai_total} (항목 일치 {matched}/{comparable})'
         else:
-            priority_td = td_rs(str(ai_total))
+            compare_html = f'AI {ai_total}'
+
+        priority_td = (f'<td rowspan="7">'
+                       f'<p>{ai_total}</p>'
+                       f'<p>CCI상정: {cii_submitted}</p>'
+                       f'</td>')
+        compare_row = f'<tr><td colspan="3"><p>{compare_html}</p></td></tr>'
 
         brd_val = '' if is_prebrd else APPROVAL_LABEL.get(_effective_approval(t), '')
         rebuilt_score_rows = ''.join(
@@ -462,15 +467,15 @@ def _rebuild_ticket_rows(t: dict, has_cycle_col: bool, table_type: str) -> str:
         )
         row1 = (
             f'<tr>{td_rs("1")}{cc}'
-            f'<td rowspan="6"><p>{_key_link(key)}</p></td>'
+            f'<td rowspan="7"><p>{_key_link(key)}</p></td>'
             f'{td_rs(t.get("summary", ""))}'
-            f'{_reporter_html(t.get("reporter", ""), t.get("initiator", ""))}'
+            f'{_reporter_html(t.get("reporter", ""), t.get("initiator", ""), rs=7)}'
             f'{td_rs(t.get("created", ""))}{td_rs(t.get("due_date", ""))}'
-            f'<td rowspan="6">{content_html}</td>'
+            f'<td rowspan="7">{content_html}</td>'
             f'{_score_cell(0)}'
             f'{priority_td}{td_rs(brd_val)}</tr>'
         )
-        return row1 + rebuilt_score_rows
+        return row1 + rebuilt_score_rows + compare_row
 
     elif table_type == 'pending':
         hold_code = t.get('hold_code') or ''
@@ -637,25 +642,25 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
     if not tickets:
         return _no_tickets(prebrd=is_prebrd)
 
-    last_col = "CCI 상정 여부" if is_prebrd else "BRD 승인 여부"
+    last_col = "BRD 승인 여부" if not is_prebrd else "비고"
     if has_cycle_col:
-        # 항목 분포 3열(항목|셀프|AI), 2행 헤더
+        # 항목 분포 3열(항목|셀프|AI) + 7번째 비교 행, 2행 헤더
         header1 = _th_span([
             ("#", 2, 1), ("회차", 2, 1), ("Key", 2, 1), ("Ticket Summary", 2, 1),
             ("Reporter", 2, 1), ("Created", 2, 1), ("Due date", 2, 1), ("내용", 2, 1),
-            ("항목 분포", 1, 3), ("Priority 점수", 2, 1), (last_col, 2, 1),
+            ("항목 분포", 1, 3), ("Priority 점수 / CCI 상정 여부", 2, 1), (last_col, 2, 1),
         ])
     else:
         header1 = _th_span([
             ("#", 2, 1), ("Key", 2, 1), ("Ticket Summary", 2, 1),
             ("Reporter", 2, 1), ("Created", 2, 1), ("Due date", 2, 1), ("Summary", 2, 1),
-            ("항목 분포", 1, 3), ("Priority Score", 2, 1), (last_col, 2, 1),
+            ("항목 분포", 1, 3), ("Priority 점수 / CCI 상정 여부", 2, 1), (last_col, 2, 1),
         ])
     header2 = _th_span([
         ("항목", 1, 1), ("셀프(요청자)", 1, 1), ("AI(7.2 초안)", 1, 1),
     ])
 
-    def td_rs(text, rs=6):
+    def td_rs(text, rs=7):
         return f'<td rowspan="{rs}"><p>{text}</p></td>'
 
     def _content_html(t):
@@ -705,32 +710,37 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
         selfs  = t.get("self_scores") or {}
 
         ai_total = sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0)
+        cii_submitted = "O" if (float(scores.get("urgency", 0)) > 0 or ai_total > 0) else "X"
         if selfs:
             self_total = selfs.get('self_total', '')
             matched    = sum(1 for k in SCORE_KEYS
                             if selfs.get(k) and selfs.get(k) == _score_mark(scores.get(k, 0)))
             comparable = sum(1 for k in SCORE_KEYS if selfs.get(k))
-            priority_td = (f'<td rowspan="6">'
-                           f'<p>셀프 {self_total} / AI {ai_total}</p>'
-                           f'<p>(항목 일치 {matched}/{comparable})</p></td>')
+            compare_html = f'셀프 {self_total} / AI {ai_total} (항목 일치 {matched}/{comparable})'
         else:
-            priority_td = td_rs(str(ai_total))
+            compare_html = f'AI {ai_total}'
+
+        priority_td = (f'<td rowspan="7">'
+                       f'<p>{ai_total}</p>'
+                       f'<p>CCI상정: {cii_submitted}</p>'
+                       f'</td>')
+        compare_row = f'<tr><td colspan="3"><p>{compare_html}</p></td></tr>'
 
         brd_val = "" if is_prebrd else APPROVAL_LABEL.get(_effective_approval(t), "")
         content_html = _content_html(t)
-        cycle_col = f'<td rowspan="6"><p>{cycle_label(t.get("cycle_number", 0))}</p></td>' if has_cycle_col else ""
+        cycle_col = f'<td rowspan="7"><p>{cycle_label(t.get("cycle_number", 0))}</p></td>' if has_cycle_col else ""
 
         # Row 1
         rows.append(
             f"<tr>"
             f'{td_rs(str(seq))}'
             f'{cycle_col}'
-            f'<td rowspan="6"><p>{_key_link(key)}</p></td>'
+            f'<td rowspan="7"><p>{_key_link(key)}</p></td>'
             f'{td_rs(t.get("summary", ""))}'
-            f'{_reporter_html(t.get("reporter", ""), t.get("initiator", ""))}'
+            f'{_reporter_html(t.get("reporter", ""), t.get("initiator", ""), rs=7)}'
             f'{td_rs(created)}'
             f'{td_rs(t.get("due_date", ""))}'
-            f'<td rowspan="6">{content_html}</td>'
+            f'<td rowspan="7">{content_html}</td>'
             f'{_score_td3(t, 0)}'
             f'{priority_td}'
             f'{td_rs(brd_val)}'
@@ -743,6 +753,8 @@ def _build_approved_table(tickets, widths, has_cycle_col, is_prebrd=False, ref_r
                 f'{_score_td3(t, i)}'
                 f"</tr>"
             )
+        # Row 7: 셀프/AI 비교 합계 (항목 분포 3열 아래)
+        rows.append(compare_row)
 
     return _table(widths, rows)
 
@@ -1271,13 +1283,16 @@ def _detect_format_changes(prev_html: str) -> list[str]:
     # 승인 테이블: 기존 항목 분포 colspan=2 → colspan=3 (셀프/AI 추가)
     if 'colspan="2"' in prev_html and '셀프(요청자)' not in prev_html:
         notes.append('승인 테이블 항목 분포 열 구조 변경: 항목+점수(2열) → 항목+셀프(요청자)+AI(7.2 초안)(3열)')
+    # 승인 테이블: rowspan=6 → rowspan=7 (항목 분포 7번째 비교 행 추가)
+    if 'rowspan="6"' in prev_html and 'CCI상정:' not in prev_html:
+        notes.append('승인 테이블 구조 변경: rowspan 6→7, Priority 점수에 CCI상정 여부 추가, 항목 분포 하단 비교 행 추가')
     # 반려 테이블: IMG 열 추가
     if '"반려 code"' in prev_html or '반려 code' in prev_html:
         if '<th' in prev_html and 'IMG' not in prev_html:
             notes.append('반려 테이블 IMG 열 추가')
     # CCI 상정 여부 명칭 변경
     if 'CCI 안건 상정 여부' in prev_html:
-        notes.append('Pre-BRD 열 명칭 변경: CCI 안건 상정 여부 → CCI 상정 여부')
+        notes.append('열 명칭 변경: CCI 안건 상정 여부 → CCI 상정 여부')
     return notes
 
 
