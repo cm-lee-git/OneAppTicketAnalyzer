@@ -1276,23 +1276,15 @@ def _build_region_section(tickets, region_code, section_num, approved_widths,
 # ── 변경 감지 / 서브페이지 ──────────────────────────────────────
 
 def _detect_format_changes(prev_html: str) -> list[str]:
-    """이전 마스터 페이지 HTML과 현재 코드 기준으로 포맷 변경 여부 감지."""
-    notes = []
+    """이전 마스터 페이지 HTML과 현재 코드 기준으로 포맷 변경 여부 감지.
+
+    포맷 변경이 실제로 발생한 날에만 항목을 추가한다.
+    이미 적용 완료된 마이그레이션 조건은 여기에 두지 않는다.
+    """
+    notes: list[str] = []
     if not prev_html:
         return notes
-    # 승인 테이블: 기존 항목 분포 colspan=2 → colspan=3 (셀프/AI 추가)
-    if 'colspan="2"' in prev_html and '셀프(요청자)' not in prev_html:
-        notes.append('승인 테이블 항목 분포 열 구조 변경: 항목+점수(2열) → 항목+셀프(요청자)+AI(7.2 초안)(3열)')
-    # 승인 테이블: rowspan=6 → rowspan=7 (항목 분포 7번째 비교 행 추가)
-    if 'rowspan="6"' in prev_html and 'CCI상정:' not in prev_html:
-        notes.append('승인 테이블 구조 변경: rowspan 6→7, Priority 점수에 CCI상정 여부 추가, 항목 분포 하단 비교 행 추가')
-    # 반려 테이블: IMG 열 추가
-    if '"반려 code"' in prev_html or '반려 code' in prev_html:
-        if '<th' in prev_html and 'IMG' not in prev_html:
-            notes.append('반려 테이블 IMG 열 추가')
-    # CCI 상정 여부 명칭 변경
-    if 'CCI 안건 상정 여부' in prev_html:
-        notes.append('열 명칭 변경: CCI 안건 상정 여부 → CCI 상정 여부')
+    # (향후 포맷 변경 시 조건을 여기에 추가하고, 적용 완료 후 즉시 제거)
     return notes
 
 
