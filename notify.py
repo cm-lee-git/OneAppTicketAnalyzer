@@ -25,7 +25,7 @@ JIRA_TOKEN  = os.getenv("JIRA_API_TOKEN")
 JIRA_AUTH   = HTTPBasicAuth(JIRA_EMAIL, JIRA_TOKEN)
 JIRA_BROWSE = "https://hmg.atlassian.net/browse"
 
-SMTP_USER  = os.getenv("SMTP_USER", "cmlee@innocean.com")   # 발신 주소 (Outlook에 로그인된 계정)
+SMTP_USER  = os.getenv("SMTP_USER") or os.getenv("ANALYST_OWNER_EMAIL") or os.getenv("JIRA_EMAIL", "")   # 발신 주소 (Outlook에 로그인된 계정)
 
 # 프로젝트별 수신자
 PROJECT_RECIPIENTS: dict[str, list[str]] = {
