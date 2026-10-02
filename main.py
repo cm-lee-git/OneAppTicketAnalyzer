@@ -303,6 +303,28 @@ if __name__ == "__main__":
 
     _cmd_label = " ".join(sys.argv[1:])  # 예: "--doc1 --test"
 
+    # 실행 시작 안내 메시지
+    _LABELS = {
+        "delete_page":  lambda: f"Confluence 페이지 삭제 (ID: {args.delete_page})",
+        "list_fields":  lambda: "Jira 커스텀 필드 ID 목록 확인",
+        "doc1_daily":   lambda: "Doc1 당일 신규 티켓 추가",
+        "doc1":         lambda: "Doc1 전체 재생성 (주간 보고)",
+        "doc2_daily":   lambda: "Doc2 당일 신규 티켓 업데이트" + (" — Claude 분석 생략 (캐시 재사용)" if args.use_cache else ""),
+        "doc2":         lambda: "Doc2 전체 재생성",
+        "snapshot":     lambda: "회차 마감일 스냅샷" + (f" (회차 {args.force_cycle} 강제 지정)" if args.force_cycle else ""),
+        "all":          lambda: "Doc1 + Doc2 전체 업데이트",
+    }
+    for _key, _label_fn in _LABELS.items():
+        if getattr(args, _key, None):
+            _desc = _label_fn()
+            break
+    else:
+        _desc = _cmd_label
+    _test_suffix = " [테스트 모드]" if getattr(args, "test", False) else ""
+    print(f"\n{'='*50}")
+    print(f"  {_desc}{_test_suffix}")
+    print(f"{'='*50}\n")
+
     try:
         if args.delete_page:
             _check_env()
