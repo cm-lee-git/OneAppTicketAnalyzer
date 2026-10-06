@@ -166,16 +166,66 @@ def detect_new_comments(issue_key: str, seen_ids: set, since_iso: str = "") -> l
         import html as _html
         parts = []
         def walk(node):
-            if isinstance(node, dict):
-                t = node.get("type", "")
-                if t == "text":
-                    parts.append(_html.escape(node.get("text", "")))
-                elif t == "mention":
-                    mt = _html.escape(node.get("attrs", {}).get("text", ""))
-                    parts.append(f'<span style="color:#0052cc;font-weight:bold;">{mt}</span>')
-                elif t == "hardBreak":
-                    parts.append("<br>")
-                for ch in node.get("content", []):
+            if not isinstance(node, dict):
+                return
+            t = node.get("type", "")
+            children = node.get("content", [])
+            if t == "text":
+                marks = {m.get("type") for m in node.get("marks", [])}
+                text = _html.escape(node.get("text", ""))
+                if "strong" in marks:
+                    text = f"<b>{text}</b>"
+                if "em" in marks:
+                    text = f"<i>{text}</i>"
+                if "code" in marks:
+                    text = f"<code style='background:#f4f5f7;padding:1px 4px;border-radius:2px;font-size:12px;'>{text}</code>"
+                if "strike" in marks:
+                    text = f"<s>{text}</s>"
+                parts.append(text)
+            elif t == "mention":
+                mt = _html.escape(node.get("attrs", {}).get("text", ""))
+                parts.append(f'<span style="color:#0052cc;font-weight:bold;">{mt}</span>')
+            elif t == "hardBreak":
+                parts.append("<br>")
+            elif t == "paragraph":
+                for ch in children:
+                    walk(ch)
+                parts.append("<br>")
+            elif t == "bulletList":
+                for ch in children:
+                    parts.append("• ")
+                    walk(ch)
+            elif t == "orderedList":
+                for i, ch in enumerate(children, 1):
+                    parts.append(f"{i}. ")
+                    walk(ch)
+            elif t == "listItem":
+                for ch in children:
+                    if isinstance(ch, dict) and ch.get("type") == "paragraph":
+                        for cc in ch.get("content", []):
+                            walk(cc)
+                        parts.append("<br>")
+                    else:
+                        walk(ch)
+            elif t == "heading":
+                parts.append("<b>")
+                for ch in children:
+                    walk(ch)
+                parts.append("</b><br>")
+            elif t == "codeBlock":
+                parts.append("<pre style='background:#f4f5f7;padding:4px 8px;font-size:12px;border-radius:2px;white-space:pre-wrap;'>")
+                for ch in children:
+                    walk(ch)
+                parts.append("</pre>")
+            elif t == "rule":
+                parts.append("<hr style='border:0;border-top:1px solid #ddd;margin:6px 0;'>")
+            elif t == "blockquote":
+                parts.append("<blockquote style='border-left:3px solid #ccc;margin:4px 0;padding:2px 8px;color:#666;'>")
+                for ch in children:
+                    walk(ch)
+                parts.append("</blockquote>")
+            else:
+                for ch in children:
                     walk(ch)
         walk(c.get("body", {}))
         new_comments.append({
