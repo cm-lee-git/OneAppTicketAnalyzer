@@ -84,7 +84,9 @@ Jira 티켓 정보를 받아 아래 JSON 형식으로만 응답하세요. 설명
 필드 작성 규칙:
 - status_info: 티켓의 현재 처리 상태나 진행 현황이 있을 경우 기술 (BRD 제출·승인·반려, ICT 검토, 개발 진행 중 등)
   없으면 null. 있으면 핵심 포인트를 \\n으로 구분
+  댓글 내용을 참고하여 도출한 상태 포인트는 해당 댓글 날짜를 (MM/DD) 형식으로 뒤에 추가
   예) "BRD Confirmed, ICT 전달 완료\\n2026 Q3 개발 목표"
+  예) "개발팀 구현 중 (10/06)\\nQ3 배포 예정 (09/28)"
 - summary_ko: 고객 경험·화면 UI 관점에서 변경 전후를 대비하여 작성. 반드시 동사로 끝나거나 '~하는 티켓.'으로 끝낼 것
   현재 처리 상태(BRD 상태, 승인 여부, 개발 진행 여부 등)는 절대 포함하지 않음
   작성 순서:
@@ -98,7 +100,7 @@ Jira 티켓 정보를 받아 아래 JSON 형식으로만 응답하세요. 설명
   예) "주요 배경 포인트 A\\n주요 배경 포인트 B\\n주요 배경 포인트 C"
 
 {
-  "status_info": "현재 처리 상태 포인트1\\n포인트2 (없으면 null)",
+  "status_info": "처리 상태 포인트1\\n댓글 기반 포인트 (MM/DD) (없으면 null)",
   "summary_ko": "현재 고객 경험(AS-IS) → 변경 후 화면·플로우(TO-BE) 대비, 1~2문장, 동사로 끝남 (BRD 상태 제외)",
   "background": "핵심 배경 포인트1\\n핵심 배경 포인트2 (한국어, \\n 구분)",
   "problem": "핵심 문제 포인트1\\n핵심 문제 포인트2 (한국어, \\n 구분)",
@@ -313,7 +315,7 @@ def analyze_ticket(ticket: dict,
     comments_section = ""
     if own_comments:
         comments_section = f"""
---- 해당 티켓 댓글 (보류·반려 사유, 리뷰어 피드백 참고) ---
+--- 해당 티켓 댓글 (처리 상태·진행 현황 파악 및 보류·반려 사유 확인용) ---
 {own_comments}
 ---
 """
@@ -419,10 +421,8 @@ def analyze_tickets_batch(tickets: list[dict]) -> list[dict]:
         else:
             print(f"  [description] {key}: {len(t['description'])}자 (search에서 수신)")
 
-        # R4/H 코드 보완: Pending·Rejected 티켓의 자체 댓글 조회
-        own_comments = ""
-        if t.get("brd_approval") == "보류":
-            own_comments = jira.get_own_comments(key, max_comments=5)
+        # 자체 댓글 조회 — status_info 반영(전체 티켓) 및 R4/H 코드 보완용
+        own_comments = jira.get_own_comments(key, max_comments=5)
 
         # 캐시 확인: 티켓 내용이 동일하면 Claude 호출 생략
         h = _content_hash(t, own_comments)
