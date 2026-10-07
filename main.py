@@ -155,8 +155,9 @@ _TEST_CYCLES = [6, 7]  # test 모드에서만 조회할 회차
 
 def _get_weekly_jql() -> str:
     """전체 티켓 조회 JQL.
-    - 현재 회차 이전: 상태 무관하게 모두 포함 (히스토리 보전)
+    - 현재 회차 이전: 상태 무관하게 모두 포함 (HMG 마감 스냅샷과 일치 유지)
     - 현재 회차: 종료·취소 상태 제외 (_STATUS_FILTER 적용)
+    - Urgent Request issuetype은 jira_client에서 이미 제외 (issuetype = 10067만 조회)
     """
     current_start, _ = get_cycle_bounds(get_cycle_number(date.today()))
     return (

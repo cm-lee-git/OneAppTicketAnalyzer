@@ -29,7 +29,7 @@ class JiraClient:
         # 둘 중 하나라도 해당하면 포함
         base = (
             'project in (KCCIVOC, KEUVOCOP) '
-            'AND issuetype in (10067, "Urgent Request") '
+            'AND issuetype = 10067 '
             'AND ('
             'customfield_10183 in ("Kia", "Common") '
             'OR customfield_10585 in ("KMC", "ALL")'
