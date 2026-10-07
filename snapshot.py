@@ -1,9 +1,9 @@
 """
 회차별 마감 히스토리 스냅샷 모듈
 
-실행 시점: 각 회차 마감일(금요일) 다음날 15:00
+실행 시점: 각 회차 마감일(금요일) 15:00
 동작:
-  1. 어제가 회차 마감일인지 확인
+  1. 오늘이 회차 마감일인지 확인
   2. 맞으면 현재 티켓 현황을 cycle_snapshots.json에 저장
   3. 틀리면 종료 (스케줄러가 매일 실행해도 안전)
 """
@@ -22,19 +22,16 @@ SNAPSHOT_FILE = Path(__file__).parent / "cycle_snapshots.json"
 
 
 def _is_cycle_end_today() -> int | None:
-    """어제가 어떤 회차의 마감일이면 회차 번호 반환, 아니면 None.
-    (스냅샷은 마감일 다음날 03:00에 실행되므로 어제 기준으로 판별)
-    """
-    from datetime import timedelta
-    yesterday = date.today() - timedelta(days=1)
-    if yesterday < ANCHOR:
+    """오늘이 어떤 회차의 마감일이면 회차 번호 반환, 아니면 None."""
+    today = date.today()
+    if today < ANCHOR:
         return None
     n = 1
     while True:
         start, end = get_cycle_bounds(n)
-        if end == yesterday:
+        if end == today:
             return n
-        if start > yesterday:
+        if start > today:
             return None
         n += 1
 
@@ -140,9 +137,8 @@ def take_snapshot(force_cycle: int | None = None, as_of: str | None = None):
     """
     cycle_n = force_cycle if force_cycle is not None else _is_cycle_end_today()
     if cycle_n is None:
-        from datetime import timedelta
-        yesterday = date.today() - timedelta(days=1)
-        print(f"[Snapshot] {yesterday} 는 회차 마감일이 아닙니다. 종료.")
+        today = date.today()
+        print(f"[Snapshot] {today} 는 회차 마감일이 아닙니다. 종료.")
         return
 
     start, end = get_cycle_bounds(cycle_n)
