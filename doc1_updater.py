@@ -33,14 +33,14 @@ TABLE_TITLE  = "New/Improvement"
 MASTER_TITLE = "KKR OneApp 주간 보고 (AI 생성)"
 SECTION_PRE  = "BRD 프로세스 적용 이전 (Pre-BRD)"
 SECTION_POST = "BRD 프로세스 적용 이후"
-TOTAL_COLS   = 13   # 항목 분포: 항목|셀프(요청자)|AI(7.2 초안) 3열
+TOTAL_COLS   = 12   # Key+Summary 합침, AI 항목 분포 우측 배치
 
 # AI/셀프 불일치 셀 배경색 (불일치만 빨간색, 일치는 색 없음)
 MISMATCH_BG = "#ffebe6"   # 불일치 (빨강)
 
-# 열 너비 (px) — 새 구조: 항목|최종평가|Priority|BRD|AI 항목 분포
-# # | Cycle | Key | Summary | Reporter | Created | Due | 내용 | 항목 | 최종평가 | Priority | BRD | AI
-COL_WIDTHS = [51, 70, 182, 242, 93, 100, 98, 475, 147, 100, 110, 105, 110]
+# 열 너비 (px) — 새 구조: Key&Summary 합침, AI 항목 분포 우측
+# # | Cycle | Ticket Key & Summary | Reporter | Created | Due | 내용 | 항목 | 최종평가 | Priority | BRD | AI
+COL_WIDTHS = [51, 70, 360, 93, 100, 98, 475, 147, 100, 110, 105, 110]
 
 JIRA_BROWSE = "https://hmg.atlassian.net/browse"
 
@@ -105,7 +105,7 @@ def _td(soup: BeautifulSoup, text, rowspan: int = 1, center: bool = False) -> Ta
 
 
 def _td_link(soup: BeautifulSoup, key: str, rowspan: int = 1, center: bool = False) -> Tag:
-    """Key 셀 — Jira 티켓 URL 하이퍼링크."""
+    """Key 단독 셀 — Jira 티켓 URL 하이퍼링크 (legacy, 단독 사용 시)."""
     base = "padding: 14px 10px; line-height: 1.6;"
     style = base + " text-align: center;" if center else base
     cell = soup.new_tag('td', style=style)
@@ -116,6 +116,22 @@ def _td_link(soup: BeautifulSoup, key: str, rowspan: int = 1, center: bool = Fal
     a.string = key
     p.append(a)
     cell.append(p)
+    return cell
+
+
+def _td_key_summary(soup: BeautifulSoup, key: str, summary: str, rowspan: int = 1) -> Tag:
+    """Ticket Key & Summary 합성 셀 — Key를 링크로, Summary를 별도 단락으로."""
+    cell = soup.new_tag('td', style="padding: 14px 10px; line-height: 1.6;")
+    if rowspan > 1:
+        cell['rowspan'] = str(rowspan)
+    p_key = soup.new_tag('p')
+    a = soup.new_tag('a', href=f"{JIRA_BROWSE}/{key}")
+    a.string = key
+    p_key.append(a)
+    cell.append(p_key)
+    p_sum = soup.new_tag('p')
+    p_sum.string = summary
+    cell.append(p_sum)
     return cell
 
 
@@ -160,21 +176,24 @@ def _count_o(scores: dict) -> str:
 
 
 def _patch_ticket_summary(tr: Tag, summary: str, soup: BeautifulSoup) -> None:
-    """참조 문서 복사 행의 Ticket Summary 셀(4번째 td)을 실제 Jira 타이틀로 교체.
+    """참조 문서 복사 행의 Ticket Key & Summary 셀(3번째 td) 내 요약 텍스트 교체.
 
-    참조 문서에서 티켓 키가 다른 티켓의 내용 링크로 먼저 등장해 잘못된 행이
-    캡처될 수 있고, Jira 타이틀이 변경되어도 불일치가 생긴다.
-    첫 번째 행(rowspan 셀이 있는 행)에만 Ticket Summary 셀이 존재한다.
+    합성 셀 구조: <p><a>KEY</a></p><p>Summary</p>
+    링크(<a> 포함 <p>)는 유지하고, 링크 없는 <p>만 교체한다.
     """
     tds = tr.find_all('td', recursive=False)
-    # 열 순서: # | Cycle | Key | Ticket Summary | Reporter | Created | Due date | ...
-    if len(tds) > 3:
-        td = tds[3]
-        for child in list(td.children):
-            child.extract()
-        p = soup.new_tag('p')
-        p.string = summary
-        td.append(p)
+    # 열 순서: # | Cycle | Ticket Key & Summary | Reporter | ...
+    if len(tds) > 2:
+        td = tds[2]
+        ps = td.find_all('p', recursive=False)
+        summary_p = next((p for p in ps if not p.find('a')), None)
+        if summary_p:
+            summary_p.clear()
+            summary_p.string = summary
+        else:
+            p = soup.new_tag('p')
+            p.string = summary
+            td.append(p)
 
 
 def _section_row(soup: BeautifulSoup, text: str, colour: str = "") -> Tag:
@@ -194,9 +213,9 @@ def _section_row(soup: BeautifulSoup, text: str, colour: str = "") -> Tag:
 
 
 def _header_row(soup: BeautifulSoup) -> list:
-    """1행 헤더 반환 — 새 구조: 항목|최종 평가|Priority|BRD|AI 항목 분포."""
+    """1행 헤더 반환 — Key+Summary 합침, AI 항목 분포 우측."""
     headers = [
-        '#', 'Cycle', 'Key', 'Ticket Summary', 'Reporter', 'Created', 'Due date',
+        '#', 'Cycle', 'Ticket Key & Summary', 'Reporter', 'Created', 'Due date',
         '내용', '항목', '최종 평가', 'Priority 점수', 'BRD 승인 여부', 'AI 항목 분포',
     ]
     tr1 = soup.new_tag('tr')
@@ -303,16 +322,16 @@ def _extract_final_eval_values(html: str) -> dict[str, list[str]]:
         while i < len(trs):
             tds = trs[i].find_all(['td', 'th'])
             first = tds[0] if tds else None
-            # 티켓 블록 첫 행: 첫 td rowspan=6, 전체 13열
-            if first and first.get('rowspan') == '6' and len(tds) >= 13:
+            # 티켓 블록 첫 행: 첫 td rowspan=6, 전체 12열 (Key&Summary 합침)
+            if first and first.get('rowspan') == '6' and len(tds) >= 12:
                 key_td = tds[2]
                 a_tag = key_td.find('a')
                 if a_tag:
                     m = _TICKET_PATTERN.search(a_tag.get('href', '') + a_tag.get_text())
                     if m:
                         key = m.group()
-                        # 새 구조: tds[9] = 최종 평가[0]
-                        vals = [tds[9].get_text(strip=True)]
+                        # 새 구조(Key&Summary 합침): tds[8] = 최종 평가[0]
+                        vals = [tds[8].get_text(strip=True)]
                         for j in range(1, 6):
                             if i + j < len(trs):
                                 next_tds = trs[i + j].find_all(['td', 'th'])
@@ -454,8 +473,7 @@ def _build_pre_brd_block(soup: BeautifulSoup, ticket: dict, seq_num: int,
     tr1 = soup.new_tag('tr')
     tr1.append(_td(soup, seq_num, rowspan=6, center=True))
     tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), rowspan=6, center=True))
-    tr1.append(_td_link(soup, ticket.get('key', ''), rowspan=6, center=True))
-    tr1.append(_td(soup, ticket.get('summary', ''), rowspan=6))
+    tr1.append(_td_key_summary(soup, ticket.get('key', ''), ticket.get('summary', ''), rowspan=6))
     tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), rowspan=6, center=True))
     tr1.append(_td(soup, ticket.get('created', ''), rowspan=6))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-', rowspan=6))
@@ -521,8 +539,7 @@ def _build_post_brd_normal_block(soup: BeautifulSoup, ticket: dict,
     tr1 = soup.new_tag('tr')
     tr1.append(_td(soup, seq_num, rowspan=6, center=True))
     tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), rowspan=6, center=True))
-    tr1.append(_td_link(soup, ticket.get('key', ''), rowspan=6, center=True))
-    tr1.append(_td(soup, ticket.get('summary', ''), rowspan=6))
+    tr1.append(_td_key_summary(soup, ticket.get('key', ''), ticket.get('summary', ''), rowspan=6))
     tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), rowspan=6, center=True))
     tr1.append(_td(soup, ticket.get('created', ''), rowspan=6))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-', rowspan=6))
@@ -574,8 +591,7 @@ def _build_fast_track_block(soup: BeautifulSoup, ticket: dict,
     tr1 = soup.new_tag('tr')
     tr1.append(_td(soup, seq_num, center=True))
     tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), center=True))
-    tr1.append(_td_link(soup, ticket.get('key', ''), center=True))
-    tr1.append(_td(soup, ticket.get('summary', '')))
+    tr1.append(_td_key_summary(soup, ticket.get('key', ''), ticket.get('summary', '')))
     tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), center=True))
     tr1.append(_td(soup, ticket.get('created', '')))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-'))
@@ -634,8 +650,7 @@ def _build_group_ticket_block(soup: BeautifulSoup, ticket: dict,
     tr1 = soup.new_tag('tr')
     tr1.append(_td(soup, seq_num, center=True))
     tr1.append(_td(soup, cycle_label(ticket.get('cycle_number', 0)), center=True))
-    tr1.append(_td_link(soup, ticket.get('key', ''), center=True))
-    tr1.append(_td(soup, ticket.get('summary', '')))
+    tr1.append(_td_key_summary(soup, ticket.get('key', ''), ticket.get('summary', '')))
     tr1.append(_td_reporter(soup, ticket.get('reporter', ''), ticket.get('initiator', ''), center=True))
     tr1.append(_td(soup, ticket.get('created', '')))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-'))
