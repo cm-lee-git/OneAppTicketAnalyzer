@@ -35,12 +35,12 @@ SECTION_PRE  = "BRD 프로세스 적용 이전 (Pre-BRD)"
 SECTION_POST = "BRD 프로세스 적용 이후"
 TOTAL_COLS   = 13   # 항목 분포: 항목|셀프(요청자)|AI(7.2 초안) 3열
 
-# 셀프/AI 일치·불일치 셀 배경색
-MATCH_BG    = "#e3fcef"   # 일치 (초록)
+# AI/셀프 불일치 셀 배경색 (불일치만 빨간색, 일치는 색 없음)
 MISMATCH_BG = "#ffebe6"   # 불일치 (빨강)
 
-# 참조 문서(71139380)의 New/Improvement 표 열 너비 (px) — 항목 분포 2열→3열
-COL_WIDTHS = [51, 70, 182, 242, 93, 100, 98, 475, 147, 90, 110, 105, 107]
+# 열 너비 (px) — 새 구조: 항목|최종평가|Priority|BRD|AI 항목 분포
+# # | Cycle | Key | Summary | Reporter | Created | Due | 내용 | 항목 | 최종평가 | Priority | BRD | AI
+COL_WIDTHS = [51, 70, 182, 242, 93, 100, 98, 475, 147, 100, 110, 105, 110]
 
 JIRA_BROWSE = "https://hmg.atlassian.net/browse"
 
@@ -194,36 +194,19 @@ def _section_row(soup: BeautifulSoup, text: str, colour: str = "") -> Tag:
 
 
 def _header_row(soup: BeautifulSoup) -> list:
-    """2행 헤더 반환: 1행=메인 컬럼, 2행=항목 분포 하위 컬럼(항목|셀프|AI)."""
-    col_specs = [
-        ('#', 1), ('Cycle', 1), ('Key', 1), ('Ticket Summary', 1),
-        ('Reporter', 1), ('Created', 1), ('Due date', 1),
-        ('내용', 1), ('항목 분포', 3), ('Priority 점수', 1), ('BRD 승인 여부', 1),
+    """1행 헤더 반환 — 새 구조: 항목|최종 평가|Priority|BRD|AI 항목 분포."""
+    headers = [
+        '#', 'Cycle', 'Key', 'Ticket Summary', 'Reporter', 'Created', 'Due date',
+        '내용', '항목', '최종 평가', 'Priority 점수', 'BRD 승인 여부', 'AI 항목 분포',
     ]
     tr1 = soup.new_tag('tr')
-    for text, colspan in col_specs:
+    for text in headers:
         th = soup.new_tag('th', style="padding: 14px 10px;")
-        if colspan > 1:
-            th['colspan'] = str(colspan)
         p = soup.new_tag('p')
         p.string = text
         th.append(p)
         tr1.append(th)
-
-    tr2 = soup.new_tag('tr')
-    for _ in range(8):                              # 앞 8열: 빈 헤더
-        th = soup.new_tag('th', style="padding: 6px 10px;")
-        tr2.append(th)
-    for sub in ('항목', '셀프(요청자)', 'AI(7.2 초안)'):
-        th = soup.new_tag('th', style="padding: 6px 10px;")
-        p = soup.new_tag('p')
-        p.string = sub
-        th.append(p)
-        tr2.append(th)
-    for _ in range(2):                              # Priority 점수 + BRD 승인 여부
-        th = soup.new_tag('th', style="padding: 6px 10px;")
-        tr2.append(th)
-    return [tr1, tr2]
+    return [tr1]
 
 
 def _make_table(soup: BeautifulSoup) -> tuple[Tag, Tag]:
@@ -299,6 +282,49 @@ def _load_ref_rows_doc1(hmg_client: HmgConfluenceClient) -> dict[str, list[str]]
     except Exception as e:
         print(f"  [ref_doc1] HMG 참조 조회 실패 → {e} (전체 새로 생성)")
         return {}
+
+
+# ─── 최종 평가 보존 ──────────────────────────────────────────────────────────
+
+def _extract_final_eval_values(html: str) -> dict[str, list[str]]:
+    """기존 페이지 HTML에서 티켓별 '최종 평가' 값(6개) 추출.
+    새 구조(헤더에 '최종 평가' 존재) 페이지에서만 추출.
+    반환: {ticket_key: [val0, val1, val2, val3, val4, val5]}
+    """
+    soup = BeautifulSoup(html, 'html.parser')
+    # 새 구조 여부 확인: 헤더에 '최종 평가' 텍스트 존재해야 추출
+    if not any('최종 평가' in th.get_text() for th in soup.find_all('th')):
+        print("  [최종평가] 구형 페이지 구조 감지 → 최종 평가 추출 건너뜀")
+        return {}
+    result: dict[str, list[str]] = {}
+    for table in soup.find_all('table'):
+        trs = list(table.find_all('tr'))
+        i = 0
+        while i < len(trs):
+            tds = trs[i].find_all(['td', 'th'])
+            first = tds[0] if tds else None
+            # 티켓 블록 첫 행: 첫 td rowspan=6, 전체 13열
+            if first and first.get('rowspan') == '6' and len(tds) >= 13:
+                key_td = tds[2]
+                a_tag = key_td.find('a')
+                if a_tag:
+                    m = _TICKET_PATTERN.search(a_tag.get('href', '') + a_tag.get_text())
+                    if m:
+                        key = m.group()
+                        # 새 구조: tds[9] = 최종 평가[0]
+                        vals = [tds[9].get_text(strip=True)]
+                        for j in range(1, 6):
+                            if i + j < len(trs):
+                                next_tds = trs[i + j].find_all(['td', 'th'])
+                                vals.append(next_tds[1].get_text(strip=True) if len(next_tds) >= 2 else '')
+                            else:
+                                vals.append('')
+                        result[key] = vals
+                i += 6
+                continue
+            i += 1
+    print(f"  [최종평가] {len(result)}건 보존")
+    return result
 
 
 # ─── 내용 셀 빌더 ────────────────────────────────────────────────────────────
@@ -416,11 +442,13 @@ def _effective_brd(ticket: dict, include_brd: bool) -> str:
     return BRD_DISPLAY.get(ticket.get('brd_approval', ''), '')
 
 
-def _build_pre_brd_block(soup: BeautifulSoup, ticket: dict, seq_num: int) -> list[Tag]:
-    """Pre-BRD 6행 블록 — 참조 문서 서식."""
+def _build_pre_brd_block(soup: BeautifulSoup, ticket: dict, seq_num: int,
+                          final_evals: dict | None = None) -> list[Tag]:
+    """Pre-BRD 6행 블록 — 새 구조: 항목|최종평가|Priority|BRD|AI 항목 분포."""
     scores = ticket.get('scores', {})
     priority_text = _count_o(scores)
     brd_text = '-'
+    saved = (final_evals or {}).get(ticket.get('key', ''), [''] * 6)
 
     rows = []
     tr1 = soup.new_tag('tr')
@@ -437,52 +465,57 @@ def _build_pre_brd_block(soup: BeautifulSoup, ticket: dict, seq_num: int) -> lis
     _fill_pre_brd_content_cell(content_td, ticket, soup)
     tr1.append(content_td)
 
-    # 항목 분포 3열: 항목 | — (셀프 없음) | O/X
+    # 항목[0] | 최종평가[0](보존) | Priority(rs6) | BRD(rs6) | AI O/X[0]
     tr1.append(_td(soup, SCORE_LABELS[0]))
-    tr1.append(_td(soup, '—'))
-    tr1.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[0], 0))))
+    tr1.append(_td(soup, saved[0], center=True))
     tr1.append(_td(soup, priority_text, rowspan=6, center=True))
     tr1.append(_td(soup, brd_text, rowspan=6, center=True))
+    tr1.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[0], 0)), center=True))
     rows.append(tr1)
 
     for i in range(1, 6):
         tr = soup.new_tag('tr')
         tr.append(_td(soup, SCORE_LABELS[i]))
-        tr.append(_td(soup, '—'))
-        tr.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[i], 0))))
+        tr.append(_td(soup, saved[i], center=True))
+        tr.append(_td(soup, _score_mark(scores.get(SCORE_KEYS[i], 0)), center=True))
         rows.append(tr)
 
     return rows
 
 
 def _build_post_brd_normal_block(soup: BeautifulSoup, ticket: dict,
-                                  seq_num: int) -> list[Tag]:
-    """Post-BRD 일반 6행 블록 — 항목 분포 3열(항목|셀프|AI), 셀프/AI 색상 비교."""
-    scores = ticket.get('scores', {})
-    selfs  = ticket.get('self_scores') or {}
-    det    = ticket.get('review_detail', {})
+                                  seq_num: int,
+                                  final_evals: dict | None = None) -> list[Tag]:
+    """Post-BRD 일반 6행 블록 — 새 구조: 항목|최종평가|Priority|BRD|AI 항목 분포.
+    최종 평가 셀은 final_evals에서 보존값을 사용하며 AI가 절대 덮어쓰지 않음.
+    AI 항목 분포: 불일치만 빨간색, 일치/셀프 없음은 색 없음.
+    """
+    scores   = ticket.get('scores', {})
+    selfs    = ticket.get('self_scores') or {}
+    det      = ticket.get('review_detail', {})
     brd_text = _effective_brd(ticket, include_brd=True)
+    saved    = (final_evals or {}).get(ticket.get('key', ''), [''] * 6)
 
     ai_total = sum(1 for k in SCORE_KEYS[1:] if float(scores.get(k, 0)) > 0)
 
     if selfs:
         self_total = selfs.get('self_total', '')
         matched    = sum(1 for k in SCORE_KEYS
-                        if selfs.get(k) and selfs.get(k) == _score_mark(scores.get(k, 0)))
+                         if selfs.get(k) and selfs.get(k) == _score_mark(scores.get(k, 0)))
         comparable = sum(1 for k in SCORE_KEYS if selfs.get(k))
         priority_text = f"셀프 {self_total} / AI {ai_total}\n(항목 일치 {matched}/{comparable})"
     else:
         priority_text = str(ai_total)
 
-    def _row_cells(i):
-        key = SCORE_KEYS[i]
-        s = selfs.get(key) if selfs else None   # 'O' | 'X' | None
-        a = _score_mark(scores.get(key, 0))
-        a_text = a + (f" ({det[key]})" if key in det else "")
-        if s is None:
-            return [_td(soup, SCORE_LABELS[i]), _mark_td(soup, '—'), _mark_td(soup, a_text)]
-        bg = MATCH_BG if s == a else MISMATCH_BG
-        return [_td(soup, SCORE_LABELS[i]), _mark_td(soup, s, bg), _mark_td(soup, a_text, bg)]
+    def _ai_cell(i):
+        """AI O/X 셀 — 불일치만 빨간색, 일치/셀프 없음은 색 없음."""
+        k = SCORE_KEYS[i]
+        s = selfs.get(k) if selfs else None
+        a = _score_mark(scores.get(k, 0))
+        a_text = a + (f" ({det[k]})" if k in det else "")
+        if s is not None and s != a:
+            return _mark_td(soup, a_text, MISMATCH_BG, center=True)
+        return _td(soup, a_text, center=True)
 
     rows = []
     tr1 = soup.new_tag('tr')
@@ -499,24 +532,27 @@ def _build_post_brd_normal_block(soup: BeautifulSoup, ticket: dict,
     _fill_post_brd_content_cell(content_td, ticket, soup)
     tr1.append(content_td)
 
-    # Priority 점수 셀 — 멀티라인 지원
-    pt = soup.new_tag('td', style="padding: 14px 10px; line-height: 1.6;")
+    # 항목[0] | 최종평가[0](보존) | Priority(rs6) | BRD(rs6) | AI[0]
+    tr1.append(_td(soup, SCORE_LABELS[0]))
+    tr1.append(_td(soup, saved[0], center=True))
+
+    pt = soup.new_tag('td', style="padding: 14px 10px; line-height: 1.6; text-align: center;")
     pt['rowspan'] = '6'
     for line in priority_text.split('\n'):
         p = soup.new_tag('p')
         p.string = line
         pt.append(p)
-
-    for c in _row_cells(0):
-        tr1.append(c)
     tr1.append(pt)
+
     tr1.append(_td(soup, brd_text, rowspan=6, center=True))
+    tr1.append(_ai_cell(0))
     rows.append(tr1)
 
     for i in range(1, 6):
         tr = soup.new_tag('tr')
-        for c in _row_cells(i):
-            tr.append(c)
+        tr.append(_td(soup, SCORE_LABELS[i]))
+        tr.append(_td(soup, saved[i], center=True))
+        tr.append(_ai_cell(i))
         rows.append(tr)
 
     return rows
@@ -544,17 +580,17 @@ def _build_fast_track_block(soup: BeautifulSoup, ticket: dict,
     tr1.append(_td(soup, ticket.get('created', '')))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-'))
     tr1.append(content_td)
-    # 항목 분포 3열 span (빈 셀)
+    # 항목+최종평가 span (빈 셀, colspan=2)
     empty_dist = soup.new_tag('td')
-    empty_dist['colspan'] = '3'
-    p_empty = soup.new_tag('p')
-    p_empty.string = ''
-    empty_dist.append(p_empty)
+    empty_dist['colspan'] = '2'
+    empty_dist.append(soup.new_tag('p'))
     tr1.append(empty_dist)
     # Priority 점수 (빈)
     tr1.append(_td(soup, '', center=True))
     # BRD 승인 여부
     tr1.append(_td(soup, brd_text, center=True))
+    # AI 항목 분포 (빈)
+    tr1.append(_td(soup, '', center=True))
 
     return [tr1]
 
@@ -604,29 +640,30 @@ def _build_group_ticket_block(soup: BeautifulSoup, ticket: dict,
     tr1.append(_td(soup, ticket.get('created', '')))
     tr1.append(_td(soup, ticket.get('due_date', '') or '-'))
     tr1.append(content_td)
-    # 항목 분포 3열 span (빈 셀)
+    # 항목+최종평가 span (빈 셀, colspan=2)
     empty_dist = soup.new_tag('td')
-    empty_dist['colspan'] = '3'
-    p_empty = soup.new_tag('p')
-    p_empty.string = ''
-    empty_dist.append(p_empty)
+    empty_dist['colspan'] = '2'
+    empty_dist.append(soup.new_tag('p'))
     tr1.append(empty_dist)
     # Priority 점수 (빈)
     tr1.append(_td(soup, '', center=True))
     # BRD 승인 여부: "-"
     tr1.append(_td(soup, '-', center=True))
+    # AI 항목 분포 (빈)
+    tr1.append(_td(soup, '', center=True))
 
     return [tr1]
 
 
 def _build_post_brd_block(soup: BeautifulSoup, ticket: dict,
-                           seq_num: int) -> list[Tag]:
+                           seq_num: int,
+                           final_evals: dict | None = None) -> list[Tag]:
     """티켓 타입에 따라 적절한 블록 빌더로 라우팅."""
     if ticket.get('is_group'):
         return _build_group_ticket_block(soup, ticket, seq_num)
     if ticket.get('is_fast_track'):
         return _build_fast_track_block(soup, ticket, seq_num)
-    return _build_post_brd_normal_block(soup, ticket, seq_num)
+    return _build_post_brd_normal_block(soup, ticket, seq_num, final_evals=final_evals)
 
 
 def _build_ticket_block(soup: BeautifulSoup, ticket: dict,
@@ -638,27 +675,29 @@ def _build_ticket_block(soup: BeautifulSoup, ticket: dict,
 # ─── 표 빌더 ─────────────────────────────────────────────────────────────────
 
 def _build_pre_brd_table(soup: BeautifulSoup, pre_brd: list[dict],
-                          ref_rows: dict | None = None) -> Tag:
+                          ref_rows: dict | None = None,
+                          final_evals: dict | None = None) -> Tag:
     table, tbody = _make_table(soup)
     for hr in _header_row(soup):
         tbody.append(hr)
     seq = 0
     for ticket in pre_brd:
         seq += 1
-        for row in _build_pre_brd_block(soup, ticket, seq):
+        for row in _build_pre_brd_block(soup, ticket, seq, final_evals=final_evals):
             tbody.append(row)
     return table
 
 
 def _build_post_brd_table(soup: BeautifulSoup, post_brd: list[dict],
-                           offset: int, ref_rows: dict | None = None) -> Tag:
+                           offset: int, ref_rows: dict | None = None,
+                           final_evals: dict | None = None) -> Tag:
     table, tbody = _make_table(soup)
     for hr in _header_row(soup):
         tbody.append(hr)
     seq = offset
     for ticket in post_brd:
         seq += 1
-        for row in _build_post_brd_block(soup, ticket, seq):
+        for row in _build_post_brd_block(soup, ticket, seq, final_evals=final_evals):
             tbody.append(row)
     return table
 
@@ -998,6 +1037,19 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     if client is None:
         client = ConfluenceClient()
 
+    # 이번 주 페이지 제목 (월요일 기준) — HTML 빌드 전에 확정해야 final_evals 추출 가능
+    page_title = _get_weekly_page_title()
+
+    # 기존 페이지 탐색 → 최종 평가 값 미리 추출 (AI가 덮어쓰지 않기 위해)
+    page_id, page_version = _find_weekly_page(client, DOC_PAGE_IDS["doc1"], page_title)
+    final_evals: dict = {}
+    if page_id:
+        try:
+            existing_html, _, _ = client.get_page_storage(page_id)
+            final_evals = _extract_final_eval_values(existing_html)
+        except Exception as e:
+            print(f"[Doc1] 최종 평가 추출 실패 (빈 값으로 진행): {e}")
+
     active_cycle = get_active_cycle()
 
     # 오버라이드 적용 → KR 권역, 전체 회차 포함
@@ -1042,7 +1094,7 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
         h2_pre = soup.new_tag('h2')
         h2_pre.string = SECTION_PRE
         soup.append(h2_pre)
-        soup.append(_build_pre_brd_table(soup, pre_brd, ref_rows=ref_rows))
+        soup.append(_build_pre_brd_table(soup, pre_brd, ref_rows=ref_rows, final_evals=final_evals))
 
     # Post-BRD 섹션 (회차별 h3 구분)
     h2_post = soup.new_tag('h2')
@@ -1059,7 +1111,7 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
         h3.string = cycle_label(cn)
         soup.append(h3)
         if cycle_tickets:
-            soup.append(_build_post_brd_table(soup, cycle_tickets, offset=post_offset, ref_rows=ref_rows))
+            soup.append(_build_post_brd_table(soup, cycle_tickets, offset=post_offset, ref_rows=ref_rows, final_evals=final_evals))
             post_offset += len(cycle_tickets)
         else:
             p_empty = soup.new_tag('p')
@@ -1102,10 +1154,8 @@ def update(tickets_with_analysis: list[dict], client: ConfluenceClient | None = 
     p_disclaimer.append(em)
     soup.append(p_disclaimer)
 
-    # 이번 주 페이지 제목 (월요일 기준) + 탐색 후 업데이트/생성
-    page_title = _get_weekly_page_title()
+    # 페이지 업데이트/생성 (page_id, page_version은 함수 상단에서 이미 확보)
     timestamp = as_of if as_of else now.strftime("%m-%d %H:%M")
-    page_id, page_version = _find_weekly_page(client, DOC_PAGE_IDS["doc1"], page_title)
     if page_id:
         client.update_page(page_id, page_title, str(soup), page_version,
                            message=f"{timestamp} 업데이트: {len(kr_tickets)}건")
