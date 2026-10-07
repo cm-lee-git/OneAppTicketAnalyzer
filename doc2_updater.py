@@ -943,6 +943,7 @@ def _load_ref_tracking_data(hmg_client: HmgConfluenceClient, cutoff_cycle=None):
                 continue
             rows = table.find_all('tr')
             data_rows, total_vals, had_filtered = [], None, False
+            partial_sum = [0] * 18  # 포함된 회차 행의 누적 합계
             for tr in rows:
                 cells = tr.find_all(['td', 'th'])
                 if not cells:
@@ -955,13 +956,18 @@ def _load_ref_tracking_data(hmg_client: HmgConfluenceClient, cutoff_cycle=None):
                             had_filtered = True
                             continue  # 현재 회차 이상 제외 → 직접 계산으로 대체
                     data_rows.append(str(tr))
+                    # 포함된 행 값을 partial_sum에 누적
+                    row_nums = [_cell_int(c) for c in cells[1:]]
+                    for i in range(min(18, len(row_nums))):
+                        partial_sum[i] += row_nums[i]
                 elif first == 'Total':
                     nums = [_cell_int(c) for c in cells[1:]]
                     if len(nums) >= 18:
                         total_vals = nums[:18]
-            # 필터로 제거된 행이 있으면 ref Total도 신뢰 불가 (해당 회차 포함됐을 수 있음)
+            # 현재 회차 행이 필터로 제거된 경우: HMG Total에는 그 회차가 포함되어 있으므로
+            # 신뢰 불가 → 포함된 회차들의 partial_sum을 대신 사용
             if had_filtered:
-                total_vals = None
+                total_vals = partial_sum
             if data_rows:
                 print(f"  [ref_tracking] {len(data_rows)}개 행, total={'있음' if total_vals else '없음'}"
                       + (f" (cutoff={cutoff_cycle}회차 이상 제외)" if had_filtered else ""))
