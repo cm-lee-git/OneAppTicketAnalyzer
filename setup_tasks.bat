@@ -53,8 +53,8 @@ schtasks /create /TN "OneApp_Doc1_Daily"     /TR "%DIR%\run_doc1_daily.bat" /SC 
 :: Doc2 weekdays - master doc update + daily sub-page (main.py --doc2-daily)
 schtasks /create /TN "OneApp_Doc2"           /TR "%DIR%\run_doc2_daily.bat" /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 16:00 /F
 
-:: Snapshot weekdays 03:00 - saves only when yesterday was a cycle end date
-schtasks /create /TN "OneApp_Snapshot_Daily" /TR "%DIR%\run_snapshot.bat"   /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 03:00 /F
+:: Snapshot weekdays 15:00 - saves only when yesterday was a cycle end date
+schtasks /create /TN "OneApp_Snapshot_Daily" /TR "%DIR%\run_snapshot.bat"   /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 15:00 /F
 
 :: Notify weekdays
 schtasks /create /TN "OneApp_Notify"         /TR "%DIR%\run_notify.bat"     /SC WEEKLY /D "MON,TUE,WED,THU,FRI" /ST 16:00 /F
